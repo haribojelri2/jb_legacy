@@ -1,0 +1,49 @@
+from typing import Annotated
+from typing_extensions import TypedDict
+import operator
+
+
+class AgentState(TypedDict):
+    messages: Annotated[list[dict], operator.add]
+    user_id: str
+    query: str
+    route: str  # valuation | tax | post_exit | family | general (레거시 호환)
+    selected_agents: list[str]  # Supervisor가 동적으로 결정한 투입 에이전트 목록
+
+    # Profiler
+    user_profile: dict
+
+    # Business Valuation Agent
+    business_valuation: dict
+
+    # Tax & Succession Agent (RAG)
+    tax_comparison: dict      # {"sale": {...}, "succession": {...}}
+    tax_rag_context: str
+
+    # Post-Exit WM Agent
+    retirement_portfolio: dict
+
+    # Family Bridge
+    family_notified: bool
+    family_message: str
+
+    # Compliance
+    compliance_passed: bool
+    compliance_feedback: str
+    retry_count: int
+
+    # Clarification (추가 질문)
+    clarification_needed: str   # 비어있으면 추가 질문 불필요
+    clarification_answer: str   # 사용자 답변
+
+    # 사용자 입력 삶 팩터 (UI 드롭다운)
+    life_inputs: dict   # {"succession": "예"/"아니오", "market_trend": "성장"/"보합"/"하락", "retirement_timeline": str}
+
+    # Booking (PB·세무사 상담 예약)
+    booking_result: dict
+
+    # Output
+    final_response: str
+    final_response_raw: str  # slow_ui_adapter 적용 전 원본 (자녀 화면용)
+    ui_mode: str  # normal | slow
+    active_agents: Annotated[list[str], operator.add]
