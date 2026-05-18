@@ -53,7 +53,7 @@ def calc_gift_tax_special(business_value: int) -> dict:
     - 10억원 공제 후 10% (60억 초과분 20%)
     - 한도 600억
     """
-    deduction = 10_000_000_000  # 10억
+    deduction = 1_000_000_000  # 10억
     taxable = max(0, business_value - deduction)
 
     if taxable <= 0:

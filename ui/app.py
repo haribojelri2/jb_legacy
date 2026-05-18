@@ -4,17 +4,19 @@
 
 import sys, os, re
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
-
+# Streamlit 재실행 시 깨진 모듈 캐시 제거
+for _k in [k for k in sys.modules if k in ("graph",) or k.startswith("agents.") or k.startswith("tools.") or k.startswith("data.")]:
+    del sys.modules[_k]
 
 import streamlit as st
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
-
-
+load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 
 import uuid
 from graph import run_query, stream_query, NODE_LABELS
@@ -26,6 +28,12 @@ from agents.booking import booking_agent
 from agents.negotiation import negotiation_agent
 
 from agents.param_adjuster import detect_param_changes
+
+from agents.early_warning import calc_health_score
+from agents.dynamic_valuation import calc_dynamic_goodwill
+from agents.youth_matching import get_youth_matching_info
+from agents.contract_manager import build_contract_plan
+from agents.gan_tester import GANTester, TestReport
 
 from langchain_openai import ChatOpenAI
 
@@ -607,7 +615,7 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
                     st.caption(f"상권 트렌드: {cont['market_trend']} (연 {cont['annual_growth_rate']*100:+.0f}%)")
 
-                    st.metric("딸 10년 누적 수익", f"{cont['daughter_cumulative_income']:,}원")
+                    st.metric("자녀 10년 누적 수익", f"{cont['daughter_cumulative_income']:,}원")
 
                     st.metric("10년 후 권리금 추정", f"{cont['future_goodwill']:,}원",
 
@@ -635,9 +643,33 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
         _scenario_col(col, label, scenario, highlight)
 
+    # ── 몬테카를로 생존 확률 (추천 시나리오 기준) ─────────────────────────
+    _rec_scenario = (
+        s_sale if "A" in recommended
+        else s_succ if "B" in recommended
+        else s_hybrid if "C" in recommended
+        else s_sale
+    )
+    if _rec_scenario:
+        mc = _rec_scenario.get("monte_carlo", {})
+        if mc:
+            sp = mc["survival_probability"]
+            sp_color = "#16a34a" if sp >= 80 else "#f59e0b" if sp >= 60 else "#dc2626"
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.markdown(
+                f'<div style="background:#f9fafb;border:2px solid {sp_color};border-radius:10px;'
+                f'padding:14px;text-align:center">'
+                f'<div style="font-size:11px;color:#6b7280">📊 몬테카를로 은퇴 생존 확률</div>'
+                f'<div style="font-size:28px;font-weight:700;color:{sp_color}">{sp}%</div>'
+                f'<div style="font-size:11px;color:#9ca3af">{mc["simulations"]:,}회 시뮬레이션 · {mc["target_age"]}세까지</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            mc2.metric("중앙값 잔여자산 (100세)", f"{mc['median_final_capital']:,}원")
+            mc3.metric("하위 10% 시나리오", f"{mc['p10_final_capital']:,}원",
+                       help="최악 10% 경우의 100세 잔여자산")
 
-
-    st.caption("⚠️ 펀드·연금 상품은 원금 손실 가능성이 있습니다. B안은 순수익 20%, C안은 순수익 10%를 딸에게서 10년간 자문료로 수취하는 현실적 타협안을 가정했습니다.")
+    st.caption("⚠️ 펀드·연금 상품은 원금 손실 가능성이 있습니다. B안은 순수익 20%, C안은 순수익 10%를 자녀에게서 10년간 자문료로 수취하는 현실적 타협안을 가정했습니다.")
 
 
 
@@ -662,7 +694,7 @@ def _negotiation_section(negotiation_result: dict):
     st.divider()
 
     st.markdown(
-        '<p class="section-label" style="color:#16a34a">D안 — 딸(이과장)의 협상 제안</p>',
+        '<p class="section-label" style="color:#16a34a">D안 — 자녀(이과장)의 협상 제안</p>',
         unsafe_allow_html=True,
     )
 
@@ -703,6 +735,27 @@ def _negotiation_section(negotiation_result: dict):
 
     mc2.metric("운용자산", f"{total_capital:,}원")
 
+    # 자산 배분 내역
+    alloc = scenario.get("allocation", {})
+    if alloc and total_capital > 0:
+        st.divider()
+        st.caption("자산 배분")
+        for k, v in alloc.items():
+            pct = v / total_capital
+            st.progress(pct, text=f"{k}  {v:,}원 ({pct*100:.0f}%)")
+
+    # 월 수령 항목별 상세
+    if m:
+        st.markdown("**월 수령 내역**")
+        for k, v in m.items():
+            if k != "합계":
+                st.caption(f"{k}: {v:,}원")
+
+    rationale = scenario.get("portfolio_rationale", "")
+    if rationale:
+        with st.expander("D안 — 포트폴리오 구성 이유"):
+            st.text(rationale)
+
     if summary:
 
         st.markdown(
@@ -718,7 +771,7 @@ def _negotiation_section(negotiation_result: dict):
 
             st.caption(f"상권 트렌드: {cont.get('market_trend', '보합')} (연 {cont.get('annual_growth_rate', 0)*100:+.0f}%)")
 
-            st.metric("딸 10년 누적 수익", f"{cont.get('daughter_cumulative_income', 0):,}원")
+            st.metric("자녀 10년 누적 수익", f"{cont.get('daughter_cumulative_income', 0):,}원")
 
             st.metric("10년 후 권리금 추정", f"{cont.get('future_goodwill', 0):,}원",
                       delta=cont.get("future_grade", ""))
@@ -929,7 +982,7 @@ def _child_dashboard(result: dict | None):
                 f"자문료 {cond.get('consulting_rate',0)*100:.0f}%)"
             )
 
-            st.caption(f"딸의 한마디: \"{cond.get('message','')}\"")
+            st.caption(f"자녀의 한마디: \"{cond.get('message','')}\"")
 
             if st.button("협상안 다시 제안하기", key="renegotiate"):
 
@@ -1009,6 +1062,497 @@ def _child_dashboard(result: dict | None):
 
 
 
+def _voice_briefing_section(final_response: str):
+    """OpenAI TTS 기반 AI PB 음성 브리핑 — 시니어 배리어 프리 UI."""
+    import io
+    st.markdown('<p class="section-label">🔊 AI PB 음성 브리핑 <span style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:4px;margin-left:6px">시니어 UI</span></p>', unsafe_allow_html=True)
+    if st.button("🔊 AI PB의 음성 브리핑 듣기", use_container_width=True, key="tts_btn"):
+        with st.spinner("음성 생성 중... (약 5~10초)"):
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            # 종합 의견 핵심만 추출 (800자 이내 — TTS 비용·속도 최적화)
+            text = _strip_md(final_response)[:800]
+            speech = client.audio.speech.create(
+                model="tts-1",
+                voice="nova",   # 밝고 친근한 여성 목소리
+                input=f"안녕하세요, JB Legacy AI 어드바이저입니다. {text}",
+                response_format="mp3",
+            )
+            audio_bytes = io.BytesIO(speech.content)
+        st.audio(audio_bytes, format="audio/mp3", autoplay=False)
+        st.caption("⚠️ 본 음성 브리핑은 AI가 생성한 참고용 정보입니다. 최종 결정은 담당 PB·세무사와 상담하시기 바랍니다.")
+
+
+_GRADE_COLOR = {"정상": "#16a34a", "주의": "#f59e0b", "경보": "#dc2626"}
+_GRADE_ICON  = {"정상": "✅", "주의": "⚠️", "경보": "🚨"}
+
+
+def _early_warning_section(user_id: str, monthly_profit: int = 0):
+    """폐업 조기경보 대시보드 — 독립 패널 (DEMO MOCK)."""
+    health = calc_health_score(user_id, monthly_profit_override=monthly_profit)
+    if not health:
+        return
+
+    st.markdown(
+        '<p class="section-label">📊 경영 건강 대시보드 '
+        '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    score   = health["overall_score"]
+    grade   = health["overall_grade"]
+    gcolor  = _GRADE_COLOR[grade]
+    gicon   = _GRADE_ICON[grade]
+
+    sc1, sc2, sc3 = st.columns([1, 2, 1])
+    with sc1:
+        st.markdown(
+            f'<div style="text-align:center;padding:16px;background:#f9fafb;'
+            f'border-radius:12px;border:2px solid {gcolor}">'
+            f'<div style="font-size:32px;font-weight:700;color:{gcolor}">{score}</div>'
+            f'<div style="font-size:11px;color:#6b7280">종합 건강점수</div>'
+            f'<div style="font-size:18px;font-weight:700;color:{gcolor}">{gicon} {grade}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with sc2:
+        for name, fdata in health["factors"].items():
+            fc = _GRADE_COLOR[fdata["grade"]]
+            st.markdown(
+                f'<div style="display:flex;align-items:center;justify-content:space-between;'
+                f'font-size:13px;margin:4px 0">'
+                f'<span style="color:#374151">{name}</span>'
+                f'<span style="color:{fc};font-weight:600">'
+                f'{_GRADE_ICON[fdata["grade"]]} {fdata["grade"]}  {fdata["value"]}'
+                f'</span></div>',
+                unsafe_allow_html=True,
+            )
+    with sc3:
+        sig = health.get("suggest_exit_within_months")
+        if sig:
+            st.markdown(
+                f'<div style="background:#fef2f2;border:1px solid #fca5a5;'
+                f'padding:12px;border-radius:8px;text-align:center">'
+                f'<div style="font-size:12px;color:#991b1b;font-weight:600">'
+                f'엑시트 권고 시점</div>'
+                f'<div style="font-size:22px;font-weight:700;color:#dc2626">'
+                f'{sig}개월 이내</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="background:#f0fdf4;border:1px solid #86efac;'
+                'padding:12px;border-radius:8px;text-align:center">'
+                '<div style="font-size:12px;color:#166534;font-weight:600">'
+                '현재 상태</div>'
+                '<div style="font-size:18px;font-weight:700;color:#16a34a">'
+                '안정적 운영 중</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+    with st.expander("위험 요인 및 권고사항 보기"):
+        for w in health["warnings"]:
+            c = "#dc2626" if "심각" in w or "시급" in w else "#92400e" if "필요" in w or "높" in w else "#374151"
+            st.markdown(f'<div style="font-size:13px;color:{c};margin:4px 0">• {w}</div>', unsafe_allow_html=True)
+
+    trend = health.get("trend", {})
+    if trend.get("history_10k"):
+        with st.expander("24개월 매출 추이 차트"):
+            import pandas as pd
+            from datetime import date
+            hist = trend["history_10k"]
+            today = date.today()
+            # hist[0]=최근월 → 역순으로 뒤집어 과거→최신 순으로 표시
+            labels = []
+            for i in range(len(hist) - 1, -1, -1):
+                m = today.month - i
+                y = today.year + (m - 1) // 12
+                m = ((m - 1) % 12) + 1
+                labels.append(f"{str(y)[2:]}.{m:02d}")
+            df = pd.DataFrame({
+                "월": labels,
+                "매출(만원)": list(reversed(hist)),
+            })
+            st.line_chart(df.set_index("월")["매출(만원)"], height=200)
+            tc1, tc2, tc3 = st.columns(3)
+            tc1.metric("최근 6개월 평균", f"{trend['recent_6m_avg']//10000:,}만원")
+            tc2.metric("전월 대비", f"{trend['mom_change_pct']:+.1f}%")
+            tc3.metric("전년 대비", f"{trend['yoy_change_pct']:+.1f}%",
+                       delta_color="normal" if trend['yoy_change_pct'] > 0 else "inverse")
+
+    st.caption("⚠️ 본 데이터는 데모용 시뮬레이션입니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
+
+
+_TIMING_COLOR = {"정상": "#16a34a", "주의": "#f59e0b", "경보": "#dc2626"}
+
+
+def _dynamic_valuation_section(user_id: str, monthly_profit: int = 0):
+    """마이데이터 기반 권리금 동적 평가 & 엑시트 타이밍 — 독립 패널 (DEMO MOCK)."""
+    dv = calc_dynamic_goodwill(user_id, monthly_profit=monthly_profit or None)
+    if not dv:
+        return
+
+    st.markdown(
+        '<p class="section-label">💰 권리금 동적 평가 & 엑시트 타이밍 '
+        '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    static  = dv["static_goodwill"]
+    dynamic = dv["dynamic_goodwill"]
+    delta   = dv["delta_pct"]
+    timing  = dv["exit_timing"]
+    tc      = _TIMING_COLOR[timing["urgency"]]
+
+    vc1, vc2, vc3 = st.columns(3)
+    with vc1:
+        st.metric("기존 단순 계산 권리금", f"{static:,}원",
+                  help="월순이익 × 기준배수 (트렌드 미반영)")
+    with vc2:
+        st.metric(
+            "마이데이터 보정 권리금",
+            f"{dynamic:,}원",
+            delta=f"{delta:+.1f}% (매출·경쟁·입지 반영)",
+            delta_color="normal" if delta >= 0 else "inverse",
+        )
+    with vc3:
+        st.markdown(
+            f'<div style="background:#f9fafb;border:2px solid {tc};'
+            f'padding:14px;border-radius:10px;text-align:center">'
+            f'<div style="font-size:11px;color:#6b7280">엑시트 권고 시점</div>'
+            f'<div style="font-size:16px;font-weight:700;color:{tc}">'
+            f'{timing["recommendation"]}</div>'
+            f'<div style="font-size:11px;color:{tc};margin-top:4px">'
+            f'{_GRADE_ICON[timing["urgency"]]} {timing["urgency"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("배수 보정 상세 & 엑시트 근거"):
+        mb = dv["multiplier_breakdown"]
+        ec1, ec2 = st.columns(2)
+        with ec1:
+            st.caption(f"기준 배수: {dv['base_multiple']}개월")
+            st.caption(f"최종 적용 배수: {dv['adjusted_multiple']}개월")
+            for k, v in mb.items():
+                color = "#16a34a" if v >= 1.0 else "#dc2626"
+                st.markdown(
+                    f'<div style="font-size:13px;color:{color}">• {k}: ×{v:.2f}</div>',
+                    unsafe_allow_html=True,
+                )
+        with ec2:
+            st.markdown(
+                f'<div style="background:#f0fdf4;border-left:4px solid {tc};'
+                f'padding:12px;border-radius:0 8px 8px 0;font-size:13px;color:#1a1a2e">'
+                f'{timing["reason"]}</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption(f"적용 월순이익: {dv['monthly_profit_applied']:,}원 / 매출 추세: {dv['trend_direction']}")
+
+    st.caption("⚠️ 본 권리금은 추정치입니다. 정확한 평가는 공인중개사·세무사 상담을 받으시기 바랍니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
+
+
+_STAR = "⭐"
+
+
+def _youth_matching_section(user_id: str):
+    """지역 청년 창업가 매칭 & JB 인수 대출 — 독립 패널 (DEMO MOCK)."""
+    info = get_youth_matching_info(user_id)
+    if not info or not info.get("candidates"):
+        return
+
+    st.markdown(
+        '<p class="section-label">🤝 청년 창업가 매칭 & JB 인수 대출 '
+        '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    candidates = info["candidates"]
+    goodwill   = info["goodwill"]
+    cols       = st.columns(len(candidates))
+
+    for col, c in zip(cols, candidates):
+        with col:
+            afford_color = "#16a34a" if c["can_afford"] else "#f59e0b"
+            afford_text  = "인수 가능" if c["can_afford"] else f"자금 {c['funding_gap']:,}원 부족"
+            st.markdown(
+                f'<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;">'
+                f'<div style="font-weight:700;font-size:15px">{c["name"]} ({c["age"]}세)</div>'
+                f'<div style="font-size:12px;color:#6b7280">{c["region"]} · 신뢰도 {_STAR * int(c["rating"]//1)} {c["rating"]}</div>'
+                f'<div style="font-size:12px;margin:8px 0;color:#374151">{c["intro"]}</div>'
+                f'<div style="font-size:12px;color:{afford_color};font-weight:600">{afford_text}</div>'
+                f'<div style="font-size:11px;color:#9ca3af">자기자금 {c["budget"]:,}원'
+                + (f'  +  대출 {c["loan_limit"]:,}원' if c["loan_eligible"] else "")
+                + '</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    with st.expander("JB 청년 창업 대출 상품 안내"):
+        for p in info["loan_products"]:
+            st.markdown(
+                f'<div style="background:#eff6ff;border:1px solid #93c5fd;'
+                f'padding:12px;border-radius:8px;margin-bottom:8px">'
+                f'<b>{p["name"]}</b>  |  금리 {p["rate"]}  |  한도 {p["limit"]}<br>'
+                f'<span style="font-size:12px;color:#374151">조건: {p["condition"]}</span><br>'
+                f'<span style="font-size:12px;color:#5b21b6">{p["feature"]}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    with st.expander("인수인계 절차 안내"):
+        for step in info["transfer_steps"]:
+            st.markdown(f'<div style="font-size:13px;color:#374151;margin:4px 0">{step}</div>',
+                        unsafe_allow_html=True)
+
+    st.caption("⚠️ 매칭 후보는 데모용 시뮬레이션입니다. 본선에서 JB카드 청년 창업 대출 DB 연동 예정.")
+
+
+_CONTRACT_EVENT_ICON = {"start": "🟣", "tax": "🟡", "review": "🔵", "pension": "🟢", "end": "⚫"}
+
+
+def _contract_manager_section(result: dict):
+    """10년 자문료 자동이체 계약 & 생애주기 알림 — 독립 패널 (DEMO MOCK).
+
+    D안(negotiation_result) 또는 B/C안의 consulting_monthly 값이 있을 때만 표시.
+    """
+    neg    = result.get("negotiation_result", {})
+    cond   = neg.get("daughter_conditions", {}) if neg else {}
+    monthly = cond.get("consulting_monthly", 0)
+    rate    = cond.get("consulting_rate", 0)
+
+    if not monthly:
+        # B/C안에서 자문료 추출 시도
+        port = result.get("retirement_portfolio", {})
+        s_succ = port.get("scenario_succession") or port.get("scenario_hybrid")
+        if s_succ:
+            monthly = s_succ.get("monthly_income", {}).get("자문료·급여", 0)
+
+    if not monthly:
+        return
+
+    user_id = result.get("user_profile", {}).get("user_id", "lee_sajang")
+    plan    = build_contract_plan(user_id, monthly, rate)
+
+    st.divider()
+    st.markdown(
+        '<p class="section-label">📅 10년 자문료 자동이체 & 생애주기 알림 '
+        '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    cc1, cc2, cc3, cc4 = st.columns(4)
+    cc1.metric("월 자문료", f"{monthly:,}원")
+    cc2.metric("10년 총 수령 (세전)", f"{plan['total_gross']:,}원")
+    cc3.metric("10년 총 수령 (세후)", f"{plan['total_net']:,}원")
+    cc4.metric("연간 원천징수 추정", f"{plan['tax_annual_estimate']:,}원")
+
+    with st.expander("생애주기 이벤트 타임라인"):
+        for ev in plan["lifecycle_events"]:
+            icon = _CONTRACT_EVENT_ICON.get(ev["type"], "●")
+            st.markdown(
+                f'<div style="display:flex;gap:12px;align-items:flex-start;margin:6px 0">'
+                f'<span style="font-size:14px">{icon}</span>'
+                f'<div>'
+                f'<span style="font-size:12px;color:#9ca3af">{ev["date"]} (만 {ev["age"]}세)</span><br>'
+                f'<span style="font-size:13px;color:{ev["color"]};font-weight:600">{ev["event"]}</span>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    with st.expander("연도별 수령 스케줄"):
+        import pandas as pd
+        rows = [
+            {
+                "연도": f'{s["year"]}년차',
+                "나이": f'만 {s["age"]}세',
+                "연 수령(세전)": f'{s["annual_gross"]:,}원' if s["annual_gross"] else "계약 종료",
+                "연 수령(세후)": f'{s["annual_net"]:,}원' if s["annual_net"] else "-",
+                "누적 수령(세후)": f'{s["cumulative"]:,}원',
+            }
+            for s in plan["schedule"]
+        ]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    st.markdown(
+        f'<div style="background:#eff6ff;border:1px solid #93c5fd;'
+        f'padding:10px 14px;border-radius:8px;font-size:12px;color:#1e3a5f">'
+        f'🏦 {plan["jb_auto_transfer_note"]}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("⚠️ 자문료 세금은 추정치입니다. 본선에서 JB은행 자동이체 API 연동 예정.")
+
+
+_SEVERITY_COLOR = {"심각": "#dc2626", "보통": "#f59e0b", "경미": "#6b7280"}
+_SEVERITY_ICON  = {"심각": "🔴", "보통": "🟡", "경미": "⚪"}
+_VERDICT_COLOR  = {"통과": "#16a34a", "조건부통과": "#f59e0b", "재생성필요": "#dc2626"}
+_VERDICT_ICON   = {"통과": "✅", "조건부통과": "⚠️", "재생성필요": "❌"}
+
+
+def _gan_test_section(result: dict | None):
+    """GAN 스타일 AI 응답 품질 테스트 — Critic · Defender · Judge."""
+    st.markdown(
+        '<p class="section-label">🧪 GAN 품질 테스트 '
+        '<span style="font-size:10px;background:#ede9fe;color:#5b21b6;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">Critic vs Defender vs Judge</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    if not result:
+        st.info("먼저 채팅창에서 분석을 실행한 뒤 GAN 테스트를 시작하세요.")
+        return
+
+    final_response = result.get("final_response_raw") or result.get("final_response", "")
+    query          = result.get("query", "")
+
+    if not final_response:
+        st.warning("분석 결과 텍스트가 없습니다. 먼저 재무 분석 질문을 입력해 주세요.")
+        return
+
+    with st.expander("테스트 대상 AI 응답 미리보기"):
+        st.text(final_response[:600] + ("..." if len(final_response) > 600 else ""))
+
+    col_r, col_btn = st.columns([1, 2])
+    with col_r:
+        rounds = st.selectbox("토론 라운드", [1, 2], index=0, key="gan_rounds")
+    with col_btn:
+        st.markdown("")
+        run_btn = st.button("🚀 GAN 테스트 시작", type="primary", use_container_width=True, key="gan_run")
+
+    # 이전 결과 캐시 — 같은 응답+라운드면 재실행 안 함
+    cache_key = f"{hash(final_response)}_{rounds}"
+    cached_report: TestReport | None = st.session_state.get("gan_report") if st.session_state.get("gan_cache_key") == cache_key else None
+
+    if run_btn and not cached_report:
+        progress_ph = st.empty()
+        with st.spinner("GAN 테스트 진행 중... (약 30~60초)"):
+            progress_ph.info("🔴 공격자(Critic) 분석 중...")
+            tester = GANTester(rounds=rounds)
+            report = tester.run(query=query, ai_response=final_response)
+        progress_ph.empty()
+        st.session_state["gan_report"]    = report
+        st.session_state["gan_cache_key"] = cache_key
+        cached_report = report
+        st.rerun()
+
+    if not cached_report:
+        return
+
+    report: TestReport = cached_report
+    fs = report.final_score
+
+    # ── 최종 점수 헤더 ────────────────────────────────────────────────────
+    total  = fs.total_score
+    vc     = _VERDICT_COLOR.get(fs.verdict, "#888")
+    vi     = _VERDICT_ICON.get(fs.verdict, "")
+    sc_col = "#16a34a" if total >= 80 else "#f59e0b" if total >= 60 else "#dc2626"
+
+    r1, r2, r3 = st.columns(3)
+    r1.markdown(
+        f'<div style="text-align:center;padding:18px;background:#f9fafb;'
+        f'border:2px solid {sc_col};border-radius:12px">'
+        f'<div style="font-size:11px;color:#6b7280">종합 점수</div>'
+        f'<div style="font-size:36px;font-weight:700;color:{sc_col}">{total}</div>'
+        f'<div style="font-size:11px;color:#9ca3af">/ 100</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    r2.markdown(
+        f'<div style="text-align:center;padding:18px;background:#f9fafb;'
+        f'border:2px solid {vc};border-radius:12px">'
+        f'<div style="font-size:11px;color:#6b7280">최종 판정</div>'
+        f'<div style="font-size:22px;font-weight:700;color:{vc}">{vi} {fs.verdict}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    r3.markdown(
+        f'<div style="padding:18px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb">'
+        f'<div style="font-size:11px;color:#6b7280;margin-bottom:6px">카테고리별 점수</div>'
+        + "".join(
+            f'<div style="display:flex;justify-content:space-between;font-size:12px;margin:3px 0">'
+            f'<span style="color:#374151">{s.category}</span>'
+            f'<span style="font-weight:600;color:{"#16a34a" if s.score>=80 else "#f59e0b" if s.score>=60 else "#dc2626"}">{s.score}점</span>'
+            f'</div>'
+            for s in fs.scores
+        )
+        + f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 판정 요약 ─────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="background:#f8f6ff;border-left:4px solid #5b21b6;'
+        f'padding:14px 18px;border-radius:0 8px 8px 0;font-size:14px;'
+        f'color:#1a1a2e;margin:16px 0;white-space:pre-wrap">{fs.summary}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 핵심 개선 사항 ────────────────────────────────────────────────────
+    if fs.key_improvements:
+        st.markdown('<p class="section-label" style="margin-top:16px">핵심 개선 사항</p>', unsafe_allow_html=True)
+        for imp in fs.key_improvements:
+            st.markdown(
+                f'<div style="background:#fef3c7;border-left:3px solid #f59e0b;'
+                f'padding:8px 12px;border-radius:0 6px 6px 0;font-size:13px;'
+                f'color:#92400e;margin:4px 0">{imp}</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── 토론 과정 ─────────────────────────────────────────────────────────
+    for rd in report.rounds:
+        with st.expander(f"Round {rd.round_num} — 공격 vs 방어 상세"):
+            st.markdown("**🔴 공격자 (Critic)**")
+            for p in rd.critique.points:
+                sev_c = _SEVERITY_COLOR.get(p.severity, "#888")
+                sev_i = _SEVERITY_ICON.get(p.severity, "")
+                st.markdown(
+                    f'<div style="background:#fef2f2;border-left:3px solid {sev_c};'
+                    f'padding:10px 14px;border-radius:0 6px 6px 0;margin:6px 0">'
+                    f'<div style="font-size:12px;font-weight:700;color:{sev_c}">'
+                    f'{sev_i} {p.category} — {p.severity}</div>'
+                    f'<div style="font-size:13px;color:#1a1a2e;margin-top:4px">{p.issue}</div>'
+                    f'<div style="font-size:11px;color:#6b7280;margin-top:4px">개선: {p.suggestion}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                f'<div style="background:#fff1f2;border:1px solid #fca5a5;'
+                f'padding:10px 14px;border-radius:8px;font-size:13px;color:#7f1d1d;margin-top:8px">'
+                f'전체 약점: {rd.critique.overall_weakness}</div>',
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("")
+            st.markdown("**🔵 방어자 (Defender)**")
+            for d in rd.defense.rebuttals:
+                st.markdown(
+                    f'<div style="background:#f0fdf4;border-left:3px solid #16a34a;'
+                    f'padding:10px 14px;border-radius:0 6px 6px 0;margin:6px 0">'
+                    f'<div style="font-size:12px;font-weight:700;color:#16a34a">{d.category}</div>'
+                    f'<div style="font-size:13px;color:#1a1a2e;margin-top:4px">{d.rebuttal}</div>'
+                    f'<div style="font-size:11px;color:#6b7280;margin-top:4px">인정: {d.concession}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                f'<div style="background:#f0fdf4;border:1px solid #86efac;'
+                f'padding:10px 14px;border-radius:8px;font-size:13px;color:#14532d;margin-top:8px">'
+                f'전체 방어: {rd.defense.overall_justification}</div>',
+                unsafe_allow_html=True,
+            )
+
+    if st.button("🔄 테스트 초기화", key="gan_reset"):
+        st.session_state.pop("gan_report", None)
+        st.session_state.pop("gan_cache_key", None)
+        st.rerun()
+
+
 # ── Step management ───────────────────────────────────────────────────────────
 
 if "step" not in st.session_state:
@@ -1051,31 +1595,43 @@ if st.session_state["step"] == 1:
 
 
 
-        st.markdown('<p class="ob-group">페르소나</p>', unsafe_allow_html=True)
+        st.markdown('<p class="ob-group">사장님 페르소나</p>', unsafe_allow_html=True)
 
-        selected_user = st.radio(
+        _OWNER_LABELS = {
+            "lee_sajang":   "👴 이사장  62세 · 전주 · 30년 한정식  (3.1억 | 승계 유리)",
+            "kim_soojang":  "👨 김소장  58세 · 부산 · 5년 분식집   (0.9억 | 세금 미미)",
+            "park_wonjang": "👨‍💼 박원장  55세 · 강남 · 8년 카페     (11.2억 | 매각 유리)",
+            "choi_daepyo":  "👔 최대표  65세 · 수원 · 22년 한식뷔페 (10.1억 | 승계 유리)",
+        }
 
-            "역할",
-
-            ["lee_sajang", "lee_gwajang"],
-
-            format_func=lambda x: {
-
-                "lee_sajang":  "👴 이사장  62세 · 전주 · 30년 한정식",
-
-                "lee_gwajang": "👩 이과장  32세 · 서울 · 직장인 딸",
-
-            }[x],
-
+        selected_owner = st.radio(
+            "사장님",
+            list(_OWNER_LABELS.keys()),
+            format_func=lambda x: _OWNER_LABELS[x],
             label_visibility="collapsed",
-
         )
 
+        st.markdown('<p class="ob-group">자녀 페르소나</p>', unsafe_allow_html=True)
+
+        _CHILD_LABELS = {
+            "none":        "— 자녀 없음 (사장님 단독 분석)",
+            "lee_gwajang": "👩 이과장  32세 · 서울 · 직장인 자녀",
+        }
+
+        selected_child = st.radio(
+            "자녀",
+            list(_CHILD_LABELS.keys()),
+            format_func=lambda x: _CHILD_LABELS[x],
+            label_visibility="collapsed",
+        )
+
+        selected_user = selected_child if selected_child != "none" else selected_owner
 
 
-        # 이과장은 입력 폼 불필요 — 딸 대시보드로 바로 이동
 
-        if selected_user == "lee_gwajang":
+        # 자녀 페르소나 선택 시 입력 폼 불필요 — 바로 이동
+
+        if USERS.get(selected_user, {}).get("type") == "child":
 
             st.info("이과장 화면은 아버지의 분석 결과를 공유 받아 열람합니다.\n이사장이 먼저 분석을 완료해야 합니다.")
 
@@ -1097,13 +1653,39 @@ if st.session_state["step"] == 1:
 
         else:
 
+            st.markdown('<p class="ob-group">월 순이익 입력</p>', unsafe_allow_html=True)
+
+            _default_profit = USERS.get(selected_owner, {}).get("business", {}).get("monthly_profit", 0)
+
+            _profit_mode = st.radio(
+                "입력 방식",
+                ["최근 3개월 직접 입력", "연간 순이익 ÷ 12"],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+
+            if _profit_mode == "최근 3개월 직접 입력":
+                pc1, pc2, pc3 = st.columns(3)
+                with pc1:
+                    _m1 = st.number_input("지난달", min_value=0, value=_default_profit, step=100_000, format="%d", label_visibility="visible")
+                with pc2:
+                    _m2 = st.number_input("2개월 전", min_value=0, value=_default_profit, step=100_000, format="%d", label_visibility="visible")
+                with pc3:
+                    _m3 = st.number_input("3개월 전", min_value=0, value=_default_profit, step=100_000, format="%d", label_visibility="visible")
+                _avg_profit = int((_m1 + _m2 + _m3) / 3) if (_m1 + _m2 + _m3) > 0 else _default_profit
+            else:
+                _annual = st.number_input("연간 순이익 (원)", min_value=0, value=_default_profit * 12, step=1_000_000, format="%d")
+                _avg_profit = int(_annual / 12) if _annual > 0 else _default_profit
+
+            st.caption(f"📊 적용 월 순이익: **{_avg_profit:,}원** (현재는 참고용 — 추후 분석에 반영 예정)")
+
             st.markdown('<p class="ob-group">상황 입력</p>', unsafe_allow_html=True)
 
             r1c1, r1c2, r1c3 = st.columns(3)
 
             with r1c1:
 
-                succession_input = st.selectbox("따님 승계 의향", ["예", "아니오"])
+                succession_input = st.selectbox("자녀 승계 의향", ["예", "아니오"])
 
             with r1c2:
 
@@ -1131,7 +1713,7 @@ if st.session_state["step"] == 1:
 
                 st.session_state.update({
 
-                    "selected_user":  selected_user,
+                    "selected_user":  selected_owner,
 
                     "life_inputs":    {
 
@@ -1144,6 +1726,8 @@ if st.session_state["step"] == 1:
                         "target_monthly":      _TARGET_OPTS[target_label],
 
                         "home_pension":        home_pension_input,
+
+                        "monthly_profit":      _avg_profit,
 
                     },
 
@@ -1181,7 +1765,7 @@ else:
 
     # ── 헤더 ─────────────────────────────────────────────────────────────
 
-    hc1, hc2 = st.columns([1, 9])
+    hc1, hc2, hc3 = st.columns([1, 6, 2])
 
     with hc1:
 
@@ -1189,7 +1773,7 @@ else:
 
             # 처음으로 돌아갈 때 대화 기록 초기화
 
-            st.session_state.update({"step": 1, "chat_history": [], "followup_compliance_fb": ""})
+            st.session_state.update({"step": 1, "chat_history": [], "followup_compliance_fb": "", "feature_nav": ""})
 
             st.rerun()
 
@@ -1223,7 +1807,32 @@ else:
 
         )
 
+    with hc3:
 
+        _NAV_OPTIONS = {
+            "— 기능 바로가기 —": "",
+            "📊 경영 건강 대시보드": "health",
+            "💰 권리금 동적 평가":  "goodwill",
+            "🤝 청년 창업가 매칭":  "youth",
+            "📅 자문료 계약 관리":  "contract",
+            "🧪 GAN 품질 테스트":   "gan",
+        }
+
+        _nav_sel = st.selectbox(
+            "nav",
+            list(_NAV_OPTIONS.keys()),
+            label_visibility="collapsed",
+            key="feature_nav_select",
+        )
+
+        _nav_key = _NAV_OPTIONS[_nav_sel]
+
+        if _nav_key:
+            st.session_state["feature_nav"] = _nav_key
+        elif st.session_state.get("feature_nav") and _nav_sel == "— 기능 바로가기 —":
+            st.session_state["feature_nav"] = ""
+
+    _feature_nav = st.session_state.get("feature_nav", "")
 
     # ── 이과장 전용 화면 ──────────────────────────────────────────────────
 
@@ -1263,7 +1872,13 @@ else:
 
     ))
 
-
+    _is_sale = (
+        selected_user != "lee_gwajang"
+        and (
+            (_has_result and (_result_preview or {}).get("recommended_scenario", "") == "A")
+            or bool(_feature_nav)
+        )
+    )
 
     if _has_result or st.session_state.get("child_view_active"):
 
@@ -1309,21 +1924,25 @@ else:
 
         else:
 
-            for msg in chat_history:
+            _chat_container = st.container(height=600, border=False)
 
-                with st.chat_message(msg["role"]):
+            with _chat_container:
 
-                    st.write(msg["content"])
+                for msg in chat_history:
+
+                    with st.chat_message(msg["role"]):
+
+                        st.write(msg["content"])
 
 
 
-            followup_cfb = st.session_state.get("followup_compliance_fb", "")
+                followup_cfb = st.session_state.get("followup_compliance_fb", "")
 
-            if followup_cfb:
+                if followup_cfb:
 
-                cls = "compliance-ok" if followup_cfb.startswith("✅") else "compliance-err"
+                    cls = "compliance-ok" if followup_cfb.startswith("✅") else "compliance-err"
 
-                st.markdown(f'<p class="{cls}">{followup_cfb}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="{cls}">{followup_cfb}</p>', unsafe_allow_html=True)
 
 
 
@@ -1332,12 +1951,6 @@ else:
      with col_analysis:
 
         st.markdown('<div class="analysis-divider">', unsafe_allow_html=True)
-
-        st.markdown('<p class="panel-label">분석 결과</p>', unsafe_allow_html=True)
-
-        _analysis_container = st.container(height=720, border=False)
-
-
 
         result = (
 
@@ -1349,15 +1962,46 @@ else:
 
         )
 
+        if _is_sale:
 
+            _t_analysis, _t_health, _t_goodwill, _t_youth = st.tabs([
+
+                "📋 분석 결과", "📊 경영 건강", "💰 권리금 평가", "🤝 청년 매칭",
+
+            ])
+
+        else:
+
+            st.markdown('<p class="panel-label">분석 결과</p>', unsafe_allow_html=True)
+
+            _t_analysis = st.container()
+
+            _t_health = _t_goodwill = _t_youth = None
+
+        _analysis_container = _t_analysis.container(height=720, border=False)
 
         with _analysis_container:
 
          child_active = st.session_state.get("child_view_active", False)
 
+         if _feature_nav:
+             _life_nav = st.session_state.get("life_inputs", {})
+             _mp_nav   = _life_nav.get("monthly_profit", 0)
+             if _feature_nav == "health":
+                 _early_warning_section(selected_user, monthly_profit=_mp_nav)
+             elif _feature_nav == "goodwill":
+                 _dynamic_valuation_section(selected_user, monthly_profit=_mp_nav)
+             elif _feature_nav == "youth":
+                 _youth_matching_section(selected_user)
+             elif _feature_nav == "contract":
+                 if result:
+                     _contract_manager_section(result)
+                 else:
+                     st.info("분석을 먼저 실행한 뒤 확인 가능합니다.")
+             elif _feature_nav == "gan":
+                 _gan_test_section(result)
 
-
-         if child_active and result:
+         elif child_active and result:
 
              if st.button("← 아버지 화면으로", key="back_parent"):
 
@@ -1485,17 +2129,19 @@ else:
 
                  _tax_cards(result.get("tax_comparison", {}))
 
-                 final_resp = result.get("final_response", "")
-
-                 rec_match = __import__('re').search(r'추천\s*시나리오[^\w]*([ABC])', final_resp)
-
-                 recommended = rec_match.group(1) if rec_match else ""
+                 recommended = result.get("recommended_scenario", "")
 
                  _portfolio_section(result.get("retirement_portfolio", {}), recommended)
+
+                 final_for_tts = result.get("final_response_raw") or result.get("final_response", "")
+                 if final_for_tts:
+                     _voice_briefing_section(final_for_tts)
 
                  _booking_section(result.get("booking_result", {}))
 
                  _negotiation_section(result.get("negotiation_result", {}))
+
+                 _contract_manager_section(result)
 
 
 
@@ -1533,7 +2179,7 @@ else:
 
                  st.divider()
 
-                 if st.button("👩 딸(이과장)에게 공유하기", use_container_width=True, key="share_child"):
+                 if st.button("👩 자녀(이과장)에게 공유하기", use_container_width=True, key="share_child"):
 
                      st.session_state["split_result"]      = result
 
@@ -1545,9 +2191,26 @@ else:
 
              st.caption("질문을 입력하면 분석 결과가 여기에 표시됩니다.")
 
+        if _t_health is not None:
 
+            _life = st.session_state.get("life_inputs", {})
+
+            _mp   = _life.get("monthly_profit", 0)
+
+            with _t_health:
+
+                _early_warning_section(selected_user, monthly_profit=_mp)
+
+            with _t_goodwill:
+
+                _dynamic_valuation_section(selected_user, monthly_profit=_mp)
+
+            with _t_youth:
+
+                _youth_matching_section(selected_user)
 
         st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
@@ -1643,7 +2306,7 @@ else:
 
             st.session_state["child_view_active"] = True
 
-            reply = "이전 분석 결과를 딸(이과장)에게 공유했습니다. 오른쪽 패널에서 확인하세요."
+            reply = "이전 분석 결과를 자녀(이과장)에게 공유했습니다. 오른쪽 패널에서 확인하세요."
 
             chat_history.append({"role": "assistant", "content": reply})
 
@@ -1698,8 +2361,13 @@ else:
 
             sections = _parse_sections(final) if final else {}
 
+            has_new_data = bool(result.get("tax_comparison") or result.get("retirement_portfolio"))
+            if not has_new_data and cached:
+                result = {**cached, **{k: v for k, v in result.items() if v}}
+
             summary  = (
-                sections.get("최종 권고")
+                result.get("clarification_needed", "")
+                or sections.get("최종 권고")
                 or sections.get("종합 의견")
                 or _strip_md(final)[:300]
                 or "재분석이 완료되었습니다. 오른쪽 패널을 확인하세요."
@@ -1809,16 +2477,18 @@ else:
 
             sections = _parse_sections(final) if final else {}
 
+            # 새 분석 결과에 실질 데이터가 없으면(clarification_needed 등) 이전 결과 유지
+            has_new_data = bool(result.get("tax_comparison") or result.get("retirement_portfolio"))
+            if not has_new_data and cached:
+                result = {**cached, **{k: v for k, v in result.items() if v}}
+
+            clarify = result.get("clarification_needed", "")
             summary  = (
-
-                sections.get("최종 권고")
-
+                clarify
+                or sections.get("최종 권고")
                 or sections.get("종합 의견")
-
                 or _strip_md(final)[:300]
-
                 or "분석이 완료되었습니다. 오른쪽 패널에서 상세 결과를 확인하세요."
-
             )
 
             chat_history.append({"role": "assistant", "content": summary})

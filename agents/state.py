@@ -49,5 +49,6 @@ class AgentState(TypedDict):
     # Output
     final_response: str
     final_response_raw: str  # slow_ui_adapter 적용 전 원본 (자녀 화면용)
+    recommended_scenario: str  # "A" | "B" | "C" | "" — Synthesizer가 구조화 출력으로 설정
     ui_mode: str  # normal | slow
     active_agents: Annotated[list[str], operator.add]

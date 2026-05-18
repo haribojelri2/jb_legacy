@@ -1,4 +1,4 @@
-"""Family Bridge — 딸(이과장)에게 승계 리포트 공유."""
+"""Family Bridge — 자녀(이과장)에게 승계 리포트 공유."""
 
 from agents.state import AgentState
 from data.mock_data import USERS

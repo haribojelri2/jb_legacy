@@ -11,7 +11,7 @@ _SYSTEM = """\
 당신은 JB Legacy AI 가족 협상 조율사입니다.
 부모와 자녀의 협상 조건을 바탕으로 합의안(D안)을 3~4줄로 설명하세요.
 마크다운 기호(*, **, #, `)를 절대 사용하지 마세요. 번호와 줄바꿈만 쓰세요.
-딸의 한마디를 반드시 언급하며, 어떤 부분에서 서로 이익이 되는지 짚어주세요."""
+자녀의 한마디를 반드시 언급하며, 어떤 부분에서 서로 이익이 되는지 짚어주세요."""
 
 
 def negotiation_agent(state: AgentState) -> dict:
@@ -31,8 +31,8 @@ def negotiation_agent(state: AgentState) -> dict:
     pension          = personal.get("pension_monthly_expected", 900_000)
     annual_income    = monthly_profit * 12
 
-    # 딸의 협상 조건
-    succession_rate  = float(daughter.get("succession_rate", 0.7))   # 딸이 가져갈 비율 (0~1)
+    # 자녀의 협상 조건
+    succession_rate  = float(daughter.get("succession_rate", 0.7))   # 자녀가 가져갈 비율 (0~1)
     consulting_rate  = float(daughter.get("consulting_rate", 0.20))  # 순이익 대비 자문료율
     daughter_message = daughter.get("message", "")
 
@@ -48,7 +48,7 @@ def negotiation_agent(state: AgentState) -> dict:
     partial_tax   = calc_goodwill_tax(cash_goodwill, other_income=annual_income).get("total_tax", 0)
     capital_d     = max(cash_goodwill - partial_tax, 0) + savings
 
-    # 딸이 매월 지급하는 자문료
+    # 자녀가 매월 지급하는 자문료
     consulting_monthly = int(monthly_profit * consulting_rate)
 
     # 주택연금
@@ -68,7 +68,7 @@ def negotiation_agent(state: AgentState) -> dict:
         risk_profile="balanced",
     )
 
-    # 가업 지속 가치 (딸의 승계 비율 반영)
+    # 가업 지속 가치 (자녀의 승계 비율 반영)
     continuity = calc_business_continuity(
         monthly_profit, years_operating,
         market_trend=market_trend,
@@ -89,14 +89,14 @@ def negotiation_agent(state: AgentState) -> dict:
     deal_summary = llm.invoke([
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=(
-            f"딸의 협상 제안\n"
-            f"  승계 의향: {succession_rate*100:.0f}% (사업체의 {succession_rate*100:.0f}%를 딸이 이어받음)\n"
+            f"자녀의 협상 제안\n"
+            f"  승계 의향: {succession_rate*100:.0f}% (사업체의 {succession_rate*100:.0f}%를 자녀가 이어받음)\n"
             f"  자문료: 순이익의 {consulting_rate*100:.0f}% = 월 {consulting_monthly:,}원 (10년간 부모에게 지급)\n"
-            f"  딸의 한마디: \"{daughter_message}\"\n\n"
+            f"  자녀의 한마디: \"{daughter_message}\"\n\n"
             f"D안(합의안) 결과\n"
             f"  부모 현금화 금액: {cash_goodwill:,}원 (세후 {capital_d:,}원)\n"
             f"  부모 월 수령합계: {portfolio_d['monthly_income']['합계']:,}원\n"
-            f"  딸 10년 누적 수익: {portfolio_d['business_continuity']['daughter_cumulative_income']:,}원\n"
+            f"  자녀 10년 누적 수익: {portfolio_d['business_continuity']['daughter_cumulative_income']:,}원\n"
             f"  10년 후 권리금 추정: {portfolio_d['business_continuity']['future_goodwill']:,}원"
         )),
     ]).content

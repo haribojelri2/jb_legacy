@@ -1,11 +1,57 @@
 """Post-Exit WM Agent — 3가지 시나리오별 노후 현금흐름 비교 (JB 실제 상품 기반)."""
 
 import os
+import math
+import random
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from tools.calculators import calc_goodwill_tax, estimate_business_value, calc_business_continuity
 from data.jb_products import JB_PRODUCTS, get_products_for_retirement
+
+
+def calc_survival_probability(
+    total_capital: int,
+    monthly_withdrawal: int,
+    current_age: int = 62,
+    target_age: int = 100,
+    annual_return_mean: float = 0.05,
+    annual_return_std: float = 0.10,
+    simulations: int = 1000,
+) -> dict:
+    """몬테카를로 시뮬레이션 기반 은퇴 자산 생존 확률 계산."""
+    if total_capital <= 0 or monthly_withdrawal <= 0:
+        return {}
+    years  = max(target_age - current_age, 1)
+    months = years * 12
+    # 월 수익률 파라미터 (연율 → 월율 변환)
+    monthly_mean = (1 + annual_return_mean) ** (1 / 12) - 1
+    monthly_std  = annual_return_std / math.sqrt(12)
+
+    survived      = 0
+    final_caps    = []
+    for _ in range(simulations):
+        cap = float(total_capital)
+        for _ in range(months):
+            ret = random.gauss(monthly_mean, monthly_std)
+            cap = cap * (1 + ret) - monthly_withdrawal
+            if cap <= 0:
+                cap = 0
+                break
+        final_caps.append(cap)
+        if cap > 0:
+            survived += 1
+
+    final_caps.sort()
+    return {
+        "survival_probability":  round(survived / simulations * 100, 1),
+        "simulations":           simulations,
+        "years":                 years,
+        "target_age":            target_age,
+        "median_final_capital":  int(final_caps[simulations // 2]),
+        "p10_final_capital":     int(final_caps[simulations // 10]),
+        "monthly_withdrawal":    monthly_withdrawal,
+    }
 
 # 카탈로그에서 카테고리별 최적 상품(최고 수익률) 선택
 def _best(category_keyword: str) -> dict:
@@ -222,6 +268,12 @@ def build_portfolio(total_capital: int, pension_monthly: int,
         consulting_years=10,
     )
 
+    # 몬테카를로 생존 확률 (월 수령 합계 기준, 100세까지)
+    total_monthly = income.get("합계", 0)
+    monte_carlo = calc_survival_probability(
+        total_capital, total_monthly, age, 100
+    ) if total_capital > 0 and total_monthly > 0 else {}
+
     return {
         "total_capital":        total_capital,
         "allocation":           alloc,
@@ -230,6 +282,7 @@ def build_portfolio(total_capital: int, pension_monthly: int,
         "target_monthly":       target_monthly,
         "surplus_monthly":      income["합계"] - target_monthly,
         "long_term_projection": projection,
+        "monte_carlo":          monte_carlo,
         "risk_note": "펀드·연금 상품은 원금 손실 가능성이 있습니다. 가입 전 위험등급을 반드시 확인하세요.",
     }
 
@@ -275,7 +328,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                                       home_pension_monthly=home_pension_m,
                                       risk_profile=risk_a)
 
-    # ── 시나리오 B/C: 딸의 승계 의향이 없으면 생략 ───────────────
+    # ── 시나리오 B/C: 자녀의 승계 의향이 없으면 생략 ───────────────
     portfolio_succession = None
     portfolio_hybrid     = None
 
@@ -301,7 +354,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                                                 risk_profile=risk_b)
         portfolio_succession["business_continuity"] = continuity_full
 
-        # 시나리오 C: 절충 — 권리금 50% 현금화, 나머지 + 보증금 + 설비는 딸에게 승계
+        # 시나리오 C: 절충 — 권리금 50% 현금화, 나머지 + 보증금 + 설비는 자녀에게 승계
         consulting_fee_c = int(monthly_profit * 0.1)
         half_goodwill    = goodwill // 2
         partial_tax      = calc_goodwill_tax(half_goodwill, other_income=annual_income).get("total_tax", 0)
@@ -311,7 +364,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                                             target_monthly=target_monthly,
                                             home_pension_monthly=home_pension_m,
                                             risk_profile="balanced")
-        # C안: 딸이 절반만 승계하므로 누적수익·재매각가치 50% 반영
+        # C안: 자녀가 절반만 승계하므로 누적수익·재매각가치 50% 반영
         if continuity_half:
             portfolio_hybrid["business_continuity"] = {
                 **continuity_half,
@@ -330,7 +383,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
             f"  사장님 월 수령: {portfolio_succession['monthly_income']['합계']:,}원 "
             f"(목표 대비 {portfolio_succession['surplus_monthly']:+,}원)\n"
             f"  [가업 지속 가치 — 상권 트렌드: {c['market_trend']}, 연 {c['annual_growth_rate']*100:+.0f}%]\n"
-            f"  딸 10년 누적 수익: {c['daughter_cumulative_income']:,}원\n"
+            f"  자녀 10년 누적 수익: {c['daughter_cumulative_income']:,}원\n"
             f"  10년 후 권리금 추정: {c['future_goodwill']:,}원 ({c['future_grade']})\n"
             f"  가족 총자산 증가: {c['family_asset_gain']:,}원\n\n"
         )
@@ -342,7 +395,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
             f"(목표 대비 {portfolio_hybrid['surplus_monthly']:+,}원)\n"
             + (
                 f"  [가업 지속 가치 — 절반 승계 기준]\n"
-                f"  딸 10년 누적 수익: {bc['daughter_cumulative_income']:,}원\n"
+                f"  자녀 10년 누적 수익: {bc['daughter_cumulative_income']:,}원\n"
                 f"  10년 후 권리금 추정: {bc['future_goodwill']:,}원\n"
                 f"  가족 총자산 증가: {bc['family_asset_gain']:,}원\n\n"
                 if bc else "\n"
