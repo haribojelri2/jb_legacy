@@ -1962,6 +1962,25 @@ else:
 
         )
 
+        # 기능 바로가기: 탭 바깥에 렌더링 (탭 선택 여부와 무관하게 항상 표시)
+        if _feature_nav:
+            _life_nav = st.session_state.get("life_inputs", {})
+            _mp_nav   = _life_nav.get("monthly_profit", 0)
+            with st.container(height=720, border=False):
+                if _feature_nav == "health":
+                    _early_warning_section(selected_user, monthly_profit=_mp_nav)
+                elif _feature_nav == "goodwill":
+                    _dynamic_valuation_section(selected_user, monthly_profit=_mp_nav)
+                elif _feature_nav == "youth":
+                    _youth_matching_section(selected_user)
+                elif _feature_nav == "contract":
+                    if result:
+                        _contract_manager_section(result)
+                    else:
+                        st.info("분석을 먼저 실행한 뒤 확인 가능합니다.")
+                elif _feature_nav == "gan":
+                    _gan_test_section(result)
+
         if _is_sale:
 
             _t_analysis, _t_health, _t_goodwill, _t_youth = st.tabs([
@@ -1984,24 +2003,7 @@ else:
 
          child_active = st.session_state.get("child_view_active", False)
 
-         if _feature_nav:
-             _life_nav = st.session_state.get("life_inputs", {})
-             _mp_nav   = _life_nav.get("monthly_profit", 0)
-             if _feature_nav == "health":
-                 _early_warning_section(selected_user, monthly_profit=_mp_nav)
-             elif _feature_nav == "goodwill":
-                 _dynamic_valuation_section(selected_user, monthly_profit=_mp_nav)
-             elif _feature_nav == "youth":
-                 _youth_matching_section(selected_user)
-             elif _feature_nav == "contract":
-                 if result:
-                     _contract_manager_section(result)
-                 else:
-                     st.info("분석을 먼저 실행한 뒤 확인 가능합니다.")
-             elif _feature_nav == "gan":
-                 _gan_test_section(result)
-
-         elif child_active and result:
+         if child_active and result:
 
              if st.button("← 아버지 화면으로", key="back_parent"):
 
