@@ -4,17 +4,22 @@
   supervisor → profiler
       ↓ clarification_needed?
       YES → END  (사용자에게 추가 질문 반환)
-      NO  ↓ (병렬 fan-out via dispatch)
+      NO  ↓ (병렬 fan-out — selected_agents 기반 선택 실행)
   BusinessValuation ─┐
   TaxSuccession ─────┤→ synthesizer → slow_ui → compliance
   PostExitWM ────────┘      ↓ retry?
                       YES → synthesizer   NO → family_bridge → booking → END
 
+개선사항:
+  1. 선택적 에이전트 투입: supervisor LLM이 결정, 불필요한 에이전트 skip
+  2. SqliteSaver 체크포인터: thread_id별 대화 상태 영속 저장
+  3. stream_query: 노드 완료마다 실시간 yield → UI 라이브 업데이트
+
 Python 3.14 ModuleLock 데드락 방지: openai / langchain_openai를
 메인 스레드에서 먼저 임포트해 module lock을 해소한 뒤 병렬 스레드 실행.
 """
 
-import sys, os
+import sys, os, sqlite3
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── pre-import: 병렬 스레드 실행 전 OpenAI 모듈 잠금 해소 ──
@@ -22,6 +27,7 @@ import openai          # noqa: F401
 import langchain_openai  # noqa: F401
 
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite import SqliteSaver
 from agents.state import AgentState
 from agents.supervisor import supervisor_agent
 from agents.profiler import profiler_agent
@@ -34,6 +40,23 @@ from agents.compliance import compliance_agent
 from agents.family_bridge import family_bridge_agent
 from agents.booking import booking_agent
 
+_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jb_legacy_memory.db")
+
+# UI에서 노드 이름 → 한국어 라벨 변환용
+NODE_LABELS: dict[str, str] = {
+    "supervisor":         "질문 분석",
+    "profiler":           "프로필 로딩",
+    "dispatch":           "에이전트 배분",
+    "business_valuation": "사업체 가치 평가",
+    "tax_succession":     "세금·승계 분석",
+    "post_exit_wm":       "자산운용 시뮬레이션",
+    "synthesizer":        "종합 의견 생성",
+    "slow_ui":            "UI 포맷 변환",
+    "compliance":         "금소법 검수",
+    "family_bridge":      "가족 리포트 공유",
+    "booking":            "상담 예약",
+}
+
 
 def _dispatch(state: AgentState) -> dict:
     """profiler → 병렬 domain agents 진입점 (pass-through)."""
@@ -41,13 +64,7 @@ def _dispatch(state: AgentState) -> dict:
 
 
 def _route_after_profiler(state: AgentState) -> str:
-    """추가 질문이 필요하면 바로 종료, 아니면 도메인 에이전트 투입."""
     return "clarify" if state.get("clarification_needed") else "continue"
-
-
-def _needs_booking(state: AgentState) -> bool:
-    q = state.get("query", "")
-    return any(kw in q for kw in ["예약", "상담 받고", "만나", "방문", "세무사 연결", "PB 연결"])
 
 
 def _route_compliance(state: AgentState) -> str:
@@ -56,7 +73,15 @@ def _route_compliance(state: AgentState) -> str:
     return "retry"
 
 
-def build_graph():
+def _needs_booking(state: AgentState) -> bool:
+    q = state.get("query", "")
+    return any(kw in q for kw in ["예약", "상담 받고", "만나", "방문", "세무사 연결", "PB 연결"])
+
+
+def build_graph(db_path: str = _DB_PATH):
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    saver = SqliteSaver(conn)
+
     g = StateGraph(AgentState)
 
     g.add_node("supervisor",         supervisor_agent)
@@ -74,19 +99,18 @@ def build_graph():
     g.set_entry_point("supervisor")
     g.add_edge("supervisor", "profiler")
 
-    # 추가 질문 필요 여부 분기
     g.add_conditional_edges(
         "profiler",
         _route_after_profiler,
         {"clarify": END, "continue": "dispatch"},
     )
 
-    # 병렬 fan-out: dispatch → 3개 도메인 에이전트 동시 실행
+    # 병렬 fan-out: 3개 에이전트 동시 실행 (각 에이전트는 selected_agents 보고 skip 여부 결정)
     g.add_edge("dispatch", "business_valuation")
     g.add_edge("dispatch", "tax_succession")
     g.add_edge("dispatch", "post_exit_wm")
 
-    # 병렬 fan-in: 3개 에이전트 완료 후 synthesizer
+    # 병렬 fan-in
     g.add_edge("business_valuation", "synthesizer")
     g.add_edge("tax_succession",     "synthesizer")
     g.add_edge("post_exit_wm",       "synthesizer")
@@ -105,14 +129,16 @@ def build_graph():
     )
     g.add_edge("booking", END)
 
-    return g.compile()
+    return g.compile(checkpointer=saver)
 
 
-def run_query(user_id: str, query: str,
-              clarification_answer: str = "",
-              life_inputs: dict | None = None) -> AgentState:
-    app = build_graph()
-    return app.invoke({
+def _initial_state(
+    user_id: str,
+    query: str,
+    clarification_answer: str = "",
+    life_inputs: dict | None = None,
+) -> dict:
+    return {
         "messages":              [{"role": "user", "content": query}],
         "user_id":               user_id,
         "query":                 query,
@@ -136,4 +162,43 @@ def run_query(user_id: str, query: str,
         "final_response_raw":    "",
         "ui_mode":               "normal",
         "active_agents":         [],
-    })
+    }
+
+
+def run_query(
+    user_id: str,
+    query: str,
+    clarification_answer: str = "",
+    life_inputs: dict | None = None,
+    thread_id: str | None = None,
+) -> AgentState:
+    app = build_graph()
+    config = {"configurable": {"thread_id": thread_id or user_id}}
+    return app.invoke(
+        _initial_state(user_id, query, clarification_answer, life_inputs),
+        config=config,
+    )
+
+
+def stream_query(
+    user_id: str,
+    query: str,
+    clarification_answer: str = "",
+    life_inputs: dict | None = None,
+    thread_id: str | None = None,
+):
+    """각 노드 완료 시 (node_name, state_update) yield.
+    마지막에 ("__done__", full_state) yield.
+    """
+    app = build_graph()
+    config = {"configurable": {"thread_id": thread_id or user_id}}
+    for chunk in app.stream(
+        _initial_state(user_id, query, clarification_answer, life_inputs),
+        config=config,
+        stream_mode="updates",
+    ):
+        for node_name, update in chunk.items():
+            yield node_name, update
+
+    snapshot = app.get_state(config)
+    yield "__done__", snapshot.values

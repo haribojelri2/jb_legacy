@@ -7,17 +7,33 @@ from agents.state import AgentState
 
 _SYSTEM = """\
 당신은 JB Legacy AI 오케스트레이터입니다.
-사용자 질문을 분석하여 답변에 필요한 전문 에이전트 목록을 결정하세요.
+사용자 질문을 분석하여 답변에 필요한 전문 에이전트 목록만 선택하세요.
 
 에이전트 역할:
-- BusinessValuation : 사업체 가치·권리금·시세 평가
-- TaxSuccession     : 세금·증여·상속·가업승계·절세 분석
-- PostExitWM        : 매각 후 노후 자산운용·포트폴리오 설계
+- BusinessValuation : 사업체 가치·권리금·시세 평가 (매각가, 권리금 산정)
+- TaxSuccession     : 세금·증여·상속·가업승계·절세 전략 분석
+- PostExitWM        : 매각 후 노후 자산운용·포트폴리오·월수령액 설계
 - FamilyBridge      : 가족(자녀)에게 승계 리포트 공유
+
+선택 기준:
+- 종합 상담("매각 vs 승계", "엑시트 계획", "어떻게 해야 할까") → 3개 핵심 에이전트 모두
+- 세금·절세·증여 단독 질문 → TaxSuccession만
+- 자산운용·포트폴리오·노후·월수령 단독 질문 → PostExitWM만
+- 권리금·시세·가치평가 단독 질문 → BusinessValuation만
+- 가족 공유 요청 → FamilyBridge 추가
+
 규칙:
-1. 복합 질문이면 여러 에이전트를 선택하세요.
-2. 반드시 JSON 형식만 반환하세요: {"agents": ["Agent1", ...]}
-3. 불필요한 에이전트는 포함하지 마세요."""
+1. 복합 주제면 복수 선택, 단일 주제면 해당 에이전트 하나만 선택
+2. 반드시 JSON만 반환: {"agents": ["Agent1", ...]}
+3. 불필요한 에이전트는 절대 포함하지 마세요"""
+
+_CORE = ("BusinessValuation", "TaxSuccession", "PostExitWM")
+_ROUTE_MAP = {
+    "BusinessValuation": "valuation",
+    "TaxSuccession":     "tax",
+    "PostExitWM":        "post_exit",
+    "FamilyBridge":      "family",
+}
 
 
 def supervisor_agent(state: AgentState) -> dict:
@@ -28,34 +44,24 @@ def supervisor_agent(state: AgentState) -> dict:
     ]).content.strip()
 
     try:
-        data = json.loads(resp)
-        agents = data.get("agents", [])
+        agents = json.loads(resp).get("agents", [])
     except Exception:
         agents = []
 
-    # 세 핵심 에이전트는 항상 함께 실행 — 서로 입력값을 공유하므로
-    # 하나라도 빠지면 synthesizer가 불완전한 데이터로 다른 결론을 냄
-    for core in ("BusinessValuation", "TaxSuccession", "PostExitWM"):
-        if core not in agents:
-            agents.append(core)
+    # LLM이 핵심 에이전트를 하나도 선택 안 하면 3개 전부 기본 투입
+    if not any(a in agents for a in _CORE):
+        agents = list(_CORE)
 
-    # FamilyBridge는 공유 요청일 때만
+    # 가족 공유 키워드 감지 → FamilyBridge 자동 추가
     q = state["query"]
     if any(kw in q for kw in ["딸", "아들", "자녀", "알려", "공유", "보내", "전달"]):
         if "FamilyBridge" not in agents:
             agents.append("FamilyBridge")
 
-    # 기존 route 필드도 유지 (UI 호환)
-    route_map = {
-        "BusinessValuation": "valuation",
-        "TaxSuccession": "tax",
-        "PostExitWM": "post_exit",
-        "FamilyBridge": "family",
-    }
-    route = route_map.get(agents[0], "general") if agents else "general"
+    route = _ROUTE_MAP.get(agents[0], "general")
 
     return {
         "selected_agents": agents,
-        "route": route,
-        "active_agents": ["Supervisor"],
+        "route":           route,
+        "active_agents":   ["Supervisor"],
     }

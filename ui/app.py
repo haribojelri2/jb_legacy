@@ -16,7 +16,8 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 
 
-from graph import run_query
+import uuid
+from graph import run_query, stream_query, NODE_LABELS
 
 from data.mock_data import USERS
 
@@ -188,14 +189,12 @@ def _is_followup(query: str) -> bool:
 
     resp = llm.invoke([HumanMessage(content=(
 
-        "다음 질문이 이미 완료된 사업 엑시트 분석에 대한 후속 질문인지 판단하세요.
-"
+        "다음 질문이 이미 완료된 사업 엑시트 분석에 대한 후속 질문인지 판단하세요.\n"
 
-        "후속 질문 예시: 결과 설명, 수치 재질문, 이유 설명, 포트폴리오/세금/시나리오 해석 요청, 왜/더/자세히/어떻게/비교 키워드
-"
+        "후속 질문 예시: 결과 설명, 수치 재질문, 이유 설명, 포트폴리오/세금/시나리오 해석 요청, 왜/더/자세히/어떻게/비교 키워드\n"
 
-        "새 분析 예시: 아무 분析도 없는 첫 질문, 완전히 다른 주제로 처음부터 새로 계산하는 요청
-"
+        "새 분析 예시: 아무 분析도 없는 첫 질문, 완전히 다른 주제로 처음부터 새로 계산하는 요청\n"
+
 
 
         f"질문: {query}\n"
@@ -812,6 +811,10 @@ if "step" not in st.session_state:
 
     st.session_state["step"] = 1
 
+if "thread_id" not in st.session_state:
+
+    st.session_state["thread_id"] = str(uuid.uuid4())
+
 
 
 
@@ -1172,15 +1175,35 @@ else:
 
                  if st.button("답변 후 분석", key="clarify_run"):
 
-                     with st.spinner("분석 중..."):
+                     with st.status("분석 중...", expanded=True) as _status:
 
-                         result = run_query(selected_user, st.session_state.get("last_query", ""),
+                         _final = {}
 
-                                            clarification_answer=clarify_ans,
+                         for _node, _upd in stream_query(
 
-                                            life_inputs=life)
+                             selected_user,
 
-                     st.session_state["last_result"] = result
+                             st.session_state.get("last_query", ""),
+
+                             clarification_answer=clarify_ans,
+
+                             life_inputs=life,
+
+                             thread_id=st.session_state["thread_id"],
+
+                         ):
+
+                             if _node == "__done__":
+
+                                 _final = _upd
+
+                             else:
+
+                                 _status.update(label=f"⏳ {NODE_LABELS.get(_node, _node)}...")
+
+                         _status.update(label="✅ 분석 완료", state="complete")
+
+                     st.session_state["last_result"] = _final
 
                      st.rerun()
 
@@ -1482,9 +1505,29 @@ else:
 
         else:
 
-            with st.spinner("분석 중 (세법 RAG + 계산 중)..."):
+            with st.status("분석 시작...", expanded=True) as _status:
 
-                result = run_query(selected_user, effective_q, life_inputs=current_life)
+                result = {}
+
+                for _node, _upd in stream_query(
+
+                    selected_user, effective_q,
+
+                    life_inputs=current_life,
+
+                    thread_id=st.session_state["thread_id"],
+
+                ):
+
+                    if _node == "__done__":
+
+                        result = _upd
+
+                    else:
+
+                        _status.update(label=f"⏳ {NODE_LABELS.get(_node, _node)}...")
+
+                _status.update(label="✅ 분석 완료", state="complete")
 
 
 
