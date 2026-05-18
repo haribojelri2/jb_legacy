@@ -23,6 +23,10 @@ from data.mock_data import USERS
 
 from agents.booking import booking_agent
 
+from agents.negotiation import negotiation_agent
+
+from agents.param_adjuster import detect_param_changes
+
 from langchain_openai import ChatOpenAI
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -638,6 +642,119 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
 
 
+def _negotiation_section(negotiation_result: dict):
+    """이과장이 제안한 D안(합의안) 섹션 — 이사장 분석 패널에 표시."""
+
+    if not negotiation_result:
+
+        return
+
+    scenario = negotiation_result.get("scenario_negotiated", {})
+
+    cond     = negotiation_result.get("daughter_conditions", {})
+
+    summary  = negotiation_result.get("deal_summary", "")
+
+    if not scenario:
+
+        return
+
+    st.divider()
+
+    st.markdown(
+        '<p class="section-label" style="color:#16a34a">D안 — 딸(이과장)의 협상 제안</p>',
+        unsafe_allow_html=True,
+    )
+
+    msg = cond.get("message", "")
+
+    if msg:
+
+        st.markdown(
+            f'<div style="background:#f0fdf4;border-left:4px solid #16a34a;'
+            f'padding:12px 16px;border-radius:0 8px 8px 0;font-size:14px;'
+            f'color:#14532d;margin-bottom:16px">'
+            f'💬 이과장의 한마디: <em>"{msg}"</em></div>',
+            unsafe_allow_html=True,
+        )
+
+    dc1, dc2, dc3 = st.columns(3)
+
+    dc1.metric("승계 비율", f"{cond.get('succession_rate', 0)*100:.0f}%")
+
+    dc2.metric("자문료율", f"{cond.get('consulting_rate', 0)*100:.0f}%")
+
+    dc3.metric("월 자문료", f"{cond.get('consulting_monthly', 0):,}원")
+
+    m = scenario.get("monthly_income", {})
+
+    surplus = scenario.get("surplus_monthly", 0)
+
+    total_capital = scenario.get("total_capital", 0)
+
+    mc1, mc2 = st.columns(2)
+
+    mc1.metric(
+        "아버지 월 수령합계 (D안)",
+        f"{m.get('합계', 0):,}원",
+        delta=f"목표 대비 {surplus:+,}원",
+        delta_color="normal" if surplus >= 0 else "inverse",
+    )
+
+    mc2.metric("운용자산", f"{total_capital:,}원")
+
+    if summary:
+
+        st.markdown(
+            f'<div class="rationale-box" style="margin-top:12px">{summary}</div>',
+            unsafe_allow_html=True,
+        )
+
+    cont = scenario.get("business_continuity", {})
+
+    if cont:
+
+        with st.expander("D안 — 가업 지속 가치 (자녀·가족 관점)"):
+
+            st.caption(f"상권 트렌드: {cont.get('market_trend', '보합')} (연 {cont.get('annual_growth_rate', 0)*100:+.0f}%)")
+
+            st.metric("딸 10년 누적 수익", f"{cont.get('daughter_cumulative_income', 0):,}원")
+
+            st.metric("10년 후 권리금 추정", f"{cont.get('future_goodwill', 0):,}원",
+                      delta=cont.get("future_grade", ""))
+
+            st.metric("가족 총자산 증가", f"{cont.get('family_asset_gain', 0):,}원")
+
+    proj = scenario.get("long_term_projection", {})
+
+    milestones = proj.get("milestones", {})
+
+    if milestones:
+
+        with st.expander("D안 — 장기 재정 전망"):
+
+            import pandas as pd
+
+            rows = []
+
+            for yr in [0, 5, 10, 20]:
+
+                d = milestones.get(yr)
+
+                if d:
+
+                    rows.append({
+                        "시점": f"{yr}년 후",
+                        "명목 월수령": f"{d['monthly_nominal']:,}원",
+                        "실질(물가2%)": f"{d['monthly_real']:,}원",
+                        "잔여원금": f"{d['remaining_capital']:,}원",
+                    })
+
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
+
+
 
 def _rationale_box(sections: dict, tax: dict, portfolio: dict):
 
@@ -796,6 +913,93 @@ def _child_dashboard(result: dict | None):
             summary = sections.get("최종 권고") or sections.get("종합 의견") or _strip_md(final)
 
             st.markdown(f'<div class="child-box">{summary}</div>', unsafe_allow_html=True)
+
+        # ── 이과장 협상 제안 폼 ──────────────────────────────────────────
+        st.divider()
+
+        neg_existing = result.get("negotiation_result", {})
+
+        if neg_existing:
+
+            cond = neg_existing.get("daughter_conditions", {})
+
+            st.success(
+                f"협상안(D안)이 이미 제안되었습니다 "
+                f"(승계 {cond.get('succession_rate',0)*100:.0f}% / "
+                f"자문료 {cond.get('consulting_rate',0)*100:.0f}%)"
+            )
+
+            st.caption(f"딸의 한마디: \"{cond.get('message','')}\"")
+
+            if st.button("협상안 다시 제안하기", key="renegotiate"):
+
+                st.session_state["show_negotiation_form"] = True
+
+                st.rerun()
+
+        else:
+
+            st.session_state.setdefault("show_negotiation_form", True)
+
+
+
+        if st.session_state.get("show_negotiation_form", True) and not neg_existing:
+
+            st.markdown("#### 이과장의 협상 제안")
+
+            st.caption("아버지의 시나리오를 검토하고 내 조건을 제안해보세요.")
+
+            with st.form("daughter_negotiation_form"):
+
+                col_a, col_b = st.columns(2)
+
+                with col_a:
+
+                    succession_pct = st.slider(
+                        "승계 의향 — 내가 가게를 이어받을 비율",
+                        min_value=0, max_value=100, value=70, step=5, format="%d%%",
+                    )
+
+                with col_b:
+
+                    consulting_pct = st.slider(
+                        "자문료 — 순이익 대비 아버지께 드릴 비율",
+                        min_value=5, max_value=30, value=20, step=5, format="%d%%",
+                    )
+
+                daughter_msg = st.text_input(
+                    "아버지께 한마디 (선택)",
+                    placeholder="예: 제가 최선을 다해 가게를 지키겠습니다.",
+                )
+
+                submitted = st.form_submit_button("협상안 제안하기 →", type="primary", use_container_width=True)
+
+                if submitted:
+
+                    with st.spinner("D안(합의안) 생성 중..."):
+
+                        neg_state = {
+                            **result,
+                            "daughter_inputs": {
+                                "succession_rate":  succession_pct / 100,
+                                "consulting_rate":  consulting_pct / 100,
+                                "message":          daughter_msg,
+                            },
+                        }
+
+                        neg_out = negotiation_agent(neg_state)
+
+                    merged = {**result, **neg_out}
+
+                    st.session_state["last_result"]  = merged
+
+                    st.session_state["split_result"] = merged
+
+                    st.session_state["show_negotiation_form"] = False
+
+                    st.success("D안(합의안)이 아버지 화면에 전달되었습니다!")
+
+                    st.rerun()
 
     else:
 
@@ -1291,6 +1495,8 @@ else:
 
                  _booking_section(result.get("booking_result", {}))
 
+                 _negotiation_section(result.get("negotiation_result", {}))
+
 
 
                  with st.expander("상세 분석 데이터"):
@@ -1442,6 +1648,74 @@ else:
             chat_history.append({"role": "assistant", "content": reply})
 
             st.session_state["chat_history"] = chat_history
+
+            st.rerun()
+
+
+
+        elif has_analysis and cache_valid and (
+            _param_result := detect_param_changes(effective_q, current_life)
+        ) and _param_result[0]:
+
+            # 파라미터 변경 감지 → life_inputs 업데이트 후 전체 재분석
+            param_changes, change_desc = _param_result
+
+            new_life = {**current_life, **param_changes}
+
+            st.session_state["life_inputs"] = new_life
+
+            change_summary = change_desc or "파라미터 변경: " + ", ".join(
+                f"{k}={v}" for k, v in param_changes.items()
+            )
+
+            reply_prefix = f"설정을 변경하고 다시 분석합니다.\n{change_summary}\n\n"
+
+            chat_history.append({"role": "assistant", "content": reply_prefix + "분석 중..."})
+
+            st.session_state["chat_history"] = chat_history
+
+            with st.status("파라미터 변경 후 재분석...", expanded=True) as _pstatus:
+
+                result = {}
+
+                for _node, _upd in stream_query(
+                    selected_user, effective_q,
+                    life_inputs=new_life,
+                    thread_id=st.session_state["thread_id"],
+                ):
+
+                    if _node == "__done__":
+
+                        result = _upd
+
+                    else:
+
+                        _pstatus.update(label=f"⏳ {NODE_LABELS.get(_node, _node)}...")
+
+                _pstatus.update(label="✅ 재분석 완료", state="complete")
+
+            final    = result.get("final_response_raw") or result.get("final_response", "")
+
+            sections = _parse_sections(final) if final else {}
+
+            summary  = (
+                sections.get("최종 권고")
+                or sections.get("종합 의견")
+                or _strip_md(final)[:300]
+                or "재분석이 완료되었습니다. 오른쪽 패널을 확인하세요."
+            )
+
+            chat_history[-1]["content"] = reply_prefix + summary
+
+            st.session_state.update({
+                "last_result":            result,
+                "last_user":              selected_user,
+                "last_query":             effective_q,
+                "last_life_inputs":       new_life,
+                "chat_history":           chat_history,
+                "followup_compliance_fb": "",
+                "child_view_active":      False,
+            })
 
             st.rerun()
 

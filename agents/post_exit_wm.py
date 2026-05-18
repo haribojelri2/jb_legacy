@@ -43,7 +43,7 @@ _HOME_PENSION_PER_100M = {
 }
 
 
-def _home_pension_monthly(home_value: int, age: int) -> int:
+def home_pension_monthly(home_value: int, age: int) -> int:
     """주택연금 예상 월지급금 (HF 공사 공시 기준, 종신지급 정액형)."""
     age = max(55, min(age, 70))
     rate_per_100m = _HOME_PENSION_PER_100M.get(age, 221_000)
@@ -136,7 +136,7 @@ _ALLOC_RATIO = {
 }
 
 
-def _build_portfolio(total_capital: int, pension_monthly: int,
+def build_portfolio(total_capital: int, pension_monthly: int,
                      consulting_monthly: int = 0, annuity_years: int = 10,
                      age: int = 62, target_monthly: int = 3_000_000,
                      home_pension_monthly: int = 0,
@@ -261,7 +261,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
     # 주택연금: 사용자가 활용 선택 시 계산 (모든 시나리오 공통 — 주택 귀속과 무관)
     home_value  = personal.get("real_estate", 0)
     use_home_pension = life.get("home_pension", "아니오") == "예"
-    home_pension_m = _home_pension_monthly(home_value, age) if use_home_pension and home_value > 0 else 0
+    home_pension_m = home_pension_monthly(home_value, age) if use_home_pension and home_value > 0 else 0
 
     market_trend        = life.get("market_trend", "보합")
     retirement_timeline = life.get("retirement_timeline", "3년 이내")
@@ -270,7 +270,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
     # 사업 소득 없으므로 안정 위주. 상권 하락·은퇴 임박이면 더 보수적
     risk_a = "conservative" if (market_trend == "하락" or retirement_timeline == "1년 이내") else "balanced"
     capital_sale = max(biz_val - sale_tax, 0) + savings
-    portfolio_sale = _build_portfolio(capital_sale, pension, age=age,
+    portfolio_sale = build_portfolio(capital_sale, pension, age=age,
                                       target_monthly=target_monthly,
                                       home_pension_monthly=home_pension_m,
                                       risk_profile=risk_a)
@@ -294,7 +294,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
         risk_b = "growth" if market_trend == "성장" else "balanced"
         consulting_fee_b = int(monthly_profit * 0.2)
         capital_succession   = savings
-        portfolio_succession = _build_portfolio(capital_succession, pension,
+        portfolio_succession = build_portfolio(capital_succession, pension,
                                                 consulting_monthly=consulting_fee_b, age=age,
                                                 target_monthly=target_monthly,
                                                 home_pension_monthly=home_pension_m,
@@ -306,7 +306,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
         half_goodwill    = goodwill // 2
         partial_tax      = calc_goodwill_tax(half_goodwill, other_income=annual_income).get("total_tax", 0)
         capital_hybrid   = half_goodwill - partial_tax + savings
-        portfolio_hybrid = _build_portfolio(capital_hybrid, pension,
+        portfolio_hybrid = build_portfolio(capital_hybrid, pension,
                                             consulting_monthly=consulting_fee_c, age=age,
                                             target_monthly=target_monthly,
                                             home_pension_monthly=home_pension_m,

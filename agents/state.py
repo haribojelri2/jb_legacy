@@ -42,6 +42,10 @@ class AgentState(TypedDict):
     # Booking (PB·세무사 상담 예약)
     booking_result: dict
 
+    # Family Negotiation — 이과장 협상 입력 & 결과
+    daughter_inputs: dict    # {"succession_rate": float, "consulting_rate": float, "message": str}
+    negotiation_result: dict # {"scenario_negotiated": {...}, "deal_summary": str, "daughter_conditions": {...}}
+
     # Output
     final_response: str
     final_response_raw: str  # slow_ui_adapter 적용 전 원본 (자녀 화면용)
