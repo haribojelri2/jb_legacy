@@ -55,8 +55,8 @@ def test_step2_chat_input_visible(page: Page):
 
 def test_step2_analysis_panel_hidden_initially(page: Page):
     _go_step2(page)
-    # 분析 결과 패널은 결과가 없을 때 보이지 않아야 함
-    expect(page.locator("text=분析 결과")).not_to_be_visible(timeout=3000)
+    # 분석 결과 패널은 결과가 없을 때 보이지 않아야 함
+    expect(page.locator("text=분석 결과")).not_to_be_visible(timeout=3000)
 
 
 def test_step2_back_button(page: Page):
@@ -68,11 +68,11 @@ def test_step2_back_button(page: Page):
 
 
 def test_step2_casual_message_no_analysis_panel(page: Page):
-    """인사 메시지는 분析 패널을 열지 않아야 함."""
+    """인사 메시지는 분석 패널을 열지 않아야 함."""
     _go_step2(page)
     chat_input = page.get_by_test_id("stChatInputTextArea")
     chat_input.fill("ㅎㅇ")
     chat_input.press("Enter")
     # LLM 응답 대기 (최대 15초)
     page.wait_for_timeout(15000)
-    expect(page.locator("text=분析 결과")).not_to_be_visible(timeout=2000)
+    expect(page.locator("text=분석 결과")).not_to_be_visible(timeout=2000)
