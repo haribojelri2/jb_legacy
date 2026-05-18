@@ -63,6 +63,30 @@ def synthesizer_agent(state: AgentState) -> dict:
             "active_agents": ["Synthesizer"],
         }
 
+    # 단일 에이전트 응답: 시나리오 비교 없이 질문에 직접 답변
+    _core = {"BusinessValuation", "TaxSuccession", "PostExitWM"}
+    _active_core = [a for a in selected if a in _core]
+    if len(_active_core) == 1:
+        llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+        answer = llm.invoke([
+            SystemMessage(content=(
+                "당신은 JB Legacy 금융 상담사입니다.\n"
+                "아래 전문가 분석을 바탕으로 사용자 질문에 직접 답변하세요.\n"
+                "A/B/C 시나리오 비교는 하지 마세요. 질문에 필요한 내용만 간결하게 답하세요.\n"
+                "마크다운 기호(*, **, #, `)를 사용하지 마세요.\n"
+                "마지막에 세무사·PB 상담 권장 문구를 한 줄 추가하세요."
+            )),
+            HumanMessage(content=(
+                f"[전문가 분석]\n{opinions[0]}\n\n"
+                f"[사용자 질문]\n{state['query']}"
+            )),
+        ]).content
+        return {
+            "final_response": answer,
+            "recommended_scenario": "",
+            "active_agents": ["Synthesizer"],
+        }
+
     opinions_text = "\n\n".join(opinions)
 
     # 시나리오 숫자 직접 주입
