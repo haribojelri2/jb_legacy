@@ -158,6 +158,8 @@ def _initial_state(
         "clarification_answer":  clarification_answer,
         "life_inputs":           life_inputs or {},
         "booking_result":        {},
+        "daughter_inputs":       {},
+        "negotiation_result":    {},
         "final_response":        "",
         "final_response_raw":    "",
         "ui_mode":               "normal",
