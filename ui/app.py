@@ -1765,7 +1765,7 @@ else:
 
     # ── 헤더 ─────────────────────────────────────────────────────────────
 
-    hc1, hc2, hc3 = st.columns([1, 6, 2])
+    hc1, hc2 = st.columns([1, 8])
 
     with hc1:
 
@@ -1807,32 +1807,7 @@ else:
 
         )
 
-    with hc3:
-
-        _NAV_OPTIONS = {
-            "— 기능 바로가기 —": "",
-            "📊 경영 건강 대시보드": "health",
-            "💰 권리금 동적 평가":  "goodwill",
-            "🤝 청년 창업가 매칭":  "youth",
-            "📅 자문료 계약 관리":  "contract",
-            "🧪 GAN 품질 테스트":   "gan",
-        }
-
-        _nav_sel = st.selectbox(
-            "nav",
-            list(_NAV_OPTIONS.keys()),
-            label_visibility="collapsed",
-            key="feature_nav_select",
-        )
-
-        _nav_key = _NAV_OPTIONS[_nav_sel]
-
-        if _nav_key:
-            st.session_state["feature_nav"] = _nav_key
-        elif st.session_state.get("feature_nav") and _nav_sel == "— 기능 바로가기 —":
-            st.session_state["feature_nav"] = ""
-
-    _feature_nav = st.session_state.get("feature_nav", "")
+    _feature_nav = ""
 
     # ── 이과장 전용 화면 ──────────────────────────────────────────────────
 
@@ -1876,11 +1851,10 @@ else:
         selected_user != "lee_gwajang"
         and (
             (_has_result and (_result_preview or {}).get("recommended_scenario", "") == "A")
-            or bool(_feature_nav)
         )
     )
 
-    if _has_result or st.session_state.get("child_view_active") or _feature_nav:
+    if _has_result or st.session_state.get("child_view_active"):
 
         col_chat, col_analysis = st.columns([1.1, 1], gap="large")
 
@@ -1961,25 +1935,6 @@ else:
             else None
 
         )
-
-        # 기능 바로가기: 탭 바깥에 렌더링 (탭 선택 여부와 무관하게 항상 표시)
-        if _feature_nav:
-            _life_nav = st.session_state.get("life_inputs", {})
-            _mp_nav   = _life_nav.get("monthly_profit", 0)
-            with st.container(height=720, border=False):
-                if _feature_nav == "health":
-                    _early_warning_section(selected_user, monthly_profit=_mp_nav)
-                elif _feature_nav == "goodwill":
-                    _dynamic_valuation_section(selected_user, monthly_profit=_mp_nav)
-                elif _feature_nav == "youth":
-                    _youth_matching_section(selected_user)
-                elif _feature_nav == "contract":
-                    if result:
-                        _contract_manager_section(result)
-                    else:
-                        st.info("분석을 먼저 실행한 뒤 확인 가능합니다.")
-                elif _feature_nav == "gan":
-                    _gan_test_section(result)
 
         if _is_sale:
 
