@@ -1880,7 +1880,7 @@ else:
         )
     )
 
-    if _has_result or st.session_state.get("child_view_active"):
+    if _has_result or st.session_state.get("child_view_active") or _feature_nav:
 
         col_chat, col_analysis = st.columns([1.1, 1], gap="large")
 
