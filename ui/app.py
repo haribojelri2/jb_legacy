@@ -2164,7 +2164,7 @@ else:
 
             st.markdown(
 
-                '<div style="margin-top:80px;text-align:center;color:#9ca3af;">'
+                '<div style="margin-top:24px;text-align:center;color:#9ca3af;">'
 
                 '<div style="font-size:15px;font-weight:600;color:#374151;margin-bottom:8px">무엇이 궁금하신가요?</div>'
 
@@ -2182,7 +2182,7 @@ else:
 
         else:
 
-            _chat_container = st.container(height=600, border=False)
+            _chat_container = st.container(height=430, border=False)
 
             with _chat_container:
 
@@ -2236,7 +2236,7 @@ else:
 
             _t_health = _t_goodwill = _t_youth = _t_fraud = None
 
-        _analysis_container = _t_analysis.container(height=720, border=False)
+        _analysis_container = _t_analysis.container(height=500, border=False)
 
         with _analysis_container:
 
