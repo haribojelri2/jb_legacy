@@ -223,22 +223,20 @@ def synthesizer_agent(state: AgentState) -> dict:
             if mp and multiple else f"권리금 {goodwill:,}원"
         )
 
-        # 월수령 계산 근거 (각 운용상품 수익률 명시)
+        # 월수령 계산 근거 — 실제 배분된 상품·금액을 그대로 인용 (하드코딩 금지)
         monthly_basis = ""
         if s_sale and s_sale.get("total_capital"):
-            cap    = s_sale["total_capital"]
-            alloc  = s_sale.get("allocation", {})
-            div_cap = alloc.get("월배당펀드(JB자산운용)", int(cap * 0.375))
-            dep_cap = alloc.get("정기예금(전북은행)",     int(cap * 0.375))
-            ann_cap = alloc.get("개인연금",               int(cap * 0.25))
-            pension = s_sale.get("monthly_income", {}).get("국민연금", 0)
-            monthly_basis = (
-                f"\n월수령 계산(A안): 운용자산 {cap:,}원 포트폴리오\n"
-                f"  월배당펀드(JB자산운용) {div_cap:,}원 × 연4.5%÷12 = {int(div_cap*0.045/12):,}원\n"
-                f"  정기예금(전북은행)     {dep_cap:,}원 × 연3.55%÷12 = {int(dep_cap*0.0355/12):,}원\n"
-                f"  개인연금              {ann_cap:,}원 × 연4.0%÷12 = {int(ann_cap*0.04/12):,}원\n"
-                + (f"  국민연금(프로필 기준)  {pension:,}원\n" if pension else "")
-            )
+            cap   = s_sale["total_capital"]
+            mi    = s_sale.get("monthly_income", {})
+            alloc = s_sale.get("allocation", {})
+            mb_lines = [f"\n월수령 계산(A안): 운용자산 {cap:,}원 — 전북은행·광주은행 실제 상품"]
+            for _name, _amt in alloc.items():
+                mb_lines.append(f"  배분: {_name} {_amt:,}원")
+            for _k, _v in mi.items():
+                if _k == "합계" or _v <= 0:
+                    continue
+                mb_lines.append(f"  수령: {_k} 월 {_v:,}원")
+            monthly_basis = "\n".join(mb_lines) + "\n"
 
         tax_block = (
             f"\n\n[세금·월수령 계산 근거 — 반드시 이 단계를 [계산 근거] 섹션에 그대로 인용하세요]\n"
@@ -395,24 +393,23 @@ def _build_calc_section(tax: dict, bv: dict, s_sale: dict | None,
         else:
             cap_breakdown = f"  총 운용자산: {cap:,}원"
 
-        # monthly_income 키와 allocation 키가 달라 키워드로 매핑 (상품 풀네임 포함)
-        _kw_map = [("월배당", "월배당"), ("즉시연금", "즉시연금"), ("예금", "예금"), ("IRP", "IRP")]
+        # 수령 항목을 실제 배분 상품에 매핑 (즉시연금형/예금/IRP 정확 구분)
         income_lines = []
         for prod, income in mi.items():
             if prod == "합계" or income <= 0:
                 continue
-            invested, full_name = 0, ""
-            for inc_frag, alloc_frag in _kw_map:
-                if inc_frag in prod:
-                    for ak, av in alloc.items():
-                        if alloc_frag in ak:
-                            invested, full_name = av, ak
-                            break
-                    break
-            if invested:
-                income_lines.append(f"  {prod} [{full_name}]: 투자원금 {invested:,}원 → 월 {income:,}원")
+            full_name = ""
+            for ak in alloc:
+                if "즉시연금" in prod and "즉시연금" in ak:
+                    full_name = ak; break
+                if "IRP" in prod and ("IRP" in ak or "퇴직연금" in ak):
+                    full_name = ak; break
+                if "예금이자" in prod and "예금" in ak and "즉시연금" not in ak:
+                    full_name = ak; break
+            if full_name:
+                income_lines.append(f"  {prod} [{full_name}]: 투자원금 {alloc[full_name]:,}원 → 월 {income:,}원")
             else:
-                income_lines.append(f"  {prod}: {income:,}원")
+                income_lines.append(f"  {prod}: 월 {income:,}원")
 
         target_line = ""
         if target_m:
@@ -421,7 +418,7 @@ def _build_calc_section(tax: dict, bv: dict, s_sale: dict | None,
 
         lines.append(
             f"운용자산 구성(A안 매각 후):\n{cap_breakdown}\n"
-            f"월수령(A안) — 2025년 JB금융그룹 상품 기준 추정치:\n"
+            f"월수령(A안) — 전북은행·광주은행 실제 상품 기준 추정치:\n"
             + "\n".join(income_lines)
             + f"\n  합계: {total_monthly:,}원"
             + target_line

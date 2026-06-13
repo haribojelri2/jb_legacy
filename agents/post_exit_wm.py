@@ -128,98 +128,110 @@ def _long_term_projection(portfolio: dict, annuity_years: int = 10,
         notes.append(f"자녀 경영 자문료 {consulting_years}년 후 만료 → 월 {consulting_m:,}원 감소")
     if home_pension_m > 0:
         notes.append(f"주택연금 {home_pension_m:,}원: 종신 지급 (만료 없음)")
-    notes.append("월배당펀드·예금 원금: 인출 없이 유지")
+    notes.append("정기예금 원금: 인출 없이 유지 (이자만 수령)")
 
     return {"milestones": milestones, "notes": notes}
 
 
-# risk_profile별 자산 배분 비율
-_ALLOC_RATIO = {
-    "conservative": {"fund": 0.20, "annuity": 0.33, "deposit": 0.33, "irp": 0.14},
-    "balanced":     {"fund": 0.30, "annuity": 0.28, "deposit": 0.27, "irp": 0.15},
-    "growth":       {"fund": 0.45, "annuity": 0.20, "deposit": 0.20, "irp": 0.15},
+# 동적 배분 파라미터 (전부 전북은행·광주은행 실제 예금/연금 상품)
+_IRP_RATIO   = 0.15      # 세액공제 목적 최소 비중
+_DEPOSIT_TAX = 0.154     # 이자소득세 15.4%
+_PENSION_TAX = 0.055     # 연금소득세 평균 5.5%
+
+# 시나리오별 몬테카를로 가정 (예금·연금형 위주 → 저위험·저변동)
+_MC_PARAMS = {
+    "conservative": (0.030, 0.010),
+    "balanced":     (0.033, 0.012),
+    "growth":       (0.036, 0.015),
 }
 
-# risk_profile별 몬테카를로 가정 (연평균 수익률, 연 변동성)
-_MC_PARAMS = {
-    "conservative": (0.030, 0.015),   # 초안정 예금 위주
-    "balanced":     (0.038, 0.040),   # 혼합형
-    "growth":       (0.045, 0.060),   # 분산 투자형
-}
+
+def _split_taxed(pmt_gross: int, principal: int, months: int) -> int:
+    """즉시연금형 예금: 원금 환급분은 비과세, 이자분만 15.4% 과세 → 세후 월수령."""
+    principal_part = principal / months if months else 0
+    interest_part  = max(0, pmt_gross - principal_part)
+    return int(principal_part + interest_part * (1 - _DEPOSIT_TAX))
 
 
 def build_portfolio(total_capital: int, pension_monthly: int,
-                     consulting_monthly: int = 0, annuity_years: int = 10,
-                     age: int = 62, target_monthly: int = 3_000_000,
-                     home_pension_monthly: int = 0,
-                     risk_profile: str = "balanced") -> dict:
-    alloc  = {}
-    income = {}
-    irp_drawdown_years = max(10, _LONGEVITY_AGE - age)
-    ratio  = _ALLOC_RATIO.get(risk_profile, _ALLOC_RATIO["balanced"])
+                    consulting_monthly: int = 0, annuity_years: int = 10,
+                    age: int = 62, target_monthly: int = 3_000_000,
+                    home_pension_monthly: int = 0,
+                    risk_profile: str = "balanced") -> dict:
+    """고객 상황(목표 생활비·연금소득·나이)에 맞춰 실제 JB 상품 비중을 동적으로 배분."""
+    alloc, income = {}, {}
+    irp_years = max(10, _LONGEVITY_AGE - age)
 
-    if total_capital >= 100_000_000:
-        p_fund    = _best("월배당")
-        p_annuity = _best("즉시연금")
-        p_deposit = _best("정기예금")
-        p_irp     = _best("퇴직연금")
+    if total_capital >= 50_000_000:
+        p_annuity = _best("즉시연금형예금") or {}
+        p_deposit = _best("정기예금") or {}
+        p_irp     = _best("퇴직연금") or {}
+        ann_rate, dep_rate, irp_rate = _rate(p_annuity), _rate(p_deposit), _rate(p_irp)
 
-        fund_amt    = int(total_capital * ratio["fund"])
-        annuity_amt = int(total_capital * ratio["annuity"])
-        deposit_amt = int(total_capital * ratio["deposit"])
-        irp_amt     = int(total_capital * ratio["irp"])
+        # IRP: 세액공제 목적 고정 비중
+        irp_amt = int(total_capital * _IRP_RATIO)
+        invest  = total_capital - irp_amt
+        irp_monthly = int(_annuity_pmt(irp_amt, irp_rate, irp_years) * (1 - _PENSION_TAX))
 
-        alloc[f"{p_fund.get('name','월배당펀드')} ({p_fund.get('bank','JB자산운용')})"]  = fund_amt
-        alloc[f"{p_annuity.get('name','즉시연금')} ({p_annuity.get('bank','JB생명')})"]  = annuity_amt
-        alloc[f"{p_deposit.get('name','정기예금')} ({p_deposit.get('bank','전북은행')})"] = deposit_amt
-        alloc[f"{p_irp.get('name','IRP')} ({p_irp.get('bank','전북은행')})"]              = irp_amt
+        # 연금·자문료로 충당 안 되어 '운용자산'에서 매월 필요한 금액
+        need = max(0, target_monthly - pension_monthly
+                   - home_pension_monthly - consulting_monthly - irp_monthly)
+        full_deposit_interest = int(invest * dep_rate / 12 * (1 - _DEPOSIT_TAX))
 
-        # 즉시연금: 사업비 7% 차감 후 실수령 원금으로 PMT 계산
-        annuity_net = int(annuity_amt * (1 - _ANNUITY_EXPENSE_RATIO))
-        # IRP: 원금 균등 분할 수령 (PMT, 기대여명까지)
-        irp_monthly = _annuity_pmt(irp_amt, _rate(p_irp), irp_drawdown_years)
+        if need <= full_deposit_interest:
+            # 예금 이자만으로 목표 충족 → 원금보존 우선 (즉시연금형 최소)
+            annuity_amt = int(invest * 0.15)
+        else:
+            # 부족분을 즉시연금형(원금+이자) 월수령으로 메우는 데 필요한 원금 역산
+            deficit = need - full_deposit_interest
+            unit = 10_000_000
+            net_per_won = _split_taxed(_annuity_pmt(unit, ann_rate, annuity_years),
+                                       unit, annuity_years * 12) / unit
+            need_amt = int(deficit / net_per_won) if net_per_won > 0 else invest
+            annuity_amt = min(invest, max(int(invest * 0.15), need_amt))
+        deposit_amt = invest - annuity_amt
 
-        # 세금 차감 후(세후) 실제 월 수령액 계산
-        # 예금/배당펀드: 이자배당소득세 15.4%
-        fund_monthly = int((fund_amt * _rate(p_fund) / 12) * (1 - 0.154))
-        deposit_monthly = int((deposit_amt * _rate(p_deposit) / 12) * (1 - 0.154))
-        
-        # 즉시연금/IRP: 연금소득세 평균 약 5.5% 가정
-        annuity_monthly = int(_annuity_pmt(annuity_net, _rate(p_annuity), annuity_years) * (1 - 0.055))
-        irp_monthly = int(_annuity_pmt(irp_amt, _rate(p_irp), irp_drawdown_years) * (1 - 0.055))
+        ann_gross       = _annuity_pmt(annuity_amt, ann_rate, annuity_years)
+        annuity_monthly = _split_taxed(ann_gross, annuity_amt, annuity_years * 12)
+        deposit_monthly = int(deposit_amt * dep_rate / 12 * (1 - _DEPOSIT_TAX))
 
-        income[f"월배당 펀드 ({_rate(p_fund)*100:.1f}%, 세후)"]                              = fund_monthly
-        income[f"즉시연금 ({_rate(p_annuity)*100:.2f}%, {annuity_years}년, 세후)"] = annuity_monthly
-        income[f"예금이자 ({_rate(p_deposit)*100:.2f}%, 세후)"]                               = deposit_monthly
-        income[f"IRP 연금수령 ({_rate(p_irp)*100:.2f}%, {irp_drawdown_years}년, 세후)"]      = irp_monthly
+        alloc[f"{p_annuity.get('name','JB 리치 100 정기예금 (즉시연금형)')} ({p_annuity.get('bank','전북은행')})"] = annuity_amt
+        alloc[f"{p_deposit.get('name','KJ 정기예금')} ({p_deposit.get('bank','광주은행')})"]                       = deposit_amt
+        alloc[f"{p_irp.get('name','JB 개인형 퇴직연금(IRP)')} ({p_irp.get('bank','전북은행')})"]                   = irp_amt
 
+        income[f"즉시연금형 예금 ({ann_rate*100:.2f}%, {annuity_years}년, 세후)"] = annuity_monthly
+        income[f"예금이자 ({dep_rate*100:.2f}%, 세후)"]                          = deposit_monthly
+        income[f"IRP 연금수령 ({irp_rate*100:.2f}%, {irp_years}년, 세후)"]       = irp_monthly
+
+        ann_pct = annuity_amt / total_capital * 100
+        dep_pct = deposit_amt / total_capital * 100
+        irp_pct = irp_amt / total_capital * 100
         rationale = (
-            f"운용자산 {total_capital:,}원을 4개 상품에 분산합니다.\n"
-            f"모든 수령액은 세후(이자/배당 15.4%, 연금 5.5% 차감) 기준입니다.\n"
-            f"월배당펀드(35%): 매월 현금 수령으로 생활비 기반 확보\n"
-            f"즉시연금(25%): 사업비 7% 차감 후 실수령 원금 {annuity_net:,}원 기준 {annuity_years}년 수령\n"
-            f"정기예금(25%): 예금자보호 1억 한도 내 원금 보호\n"
-            f"IRP(15%): {age}세 기준 {irp_drawdown_years}년 원금분할 수령 + 세액공제 혜택"
+            f"운용자산 {total_capital:,}원을 목표 생활비({target_monthly:,}원)에 맞춰 동적으로 배분했습니다.\n"
+            f"전부 전북은행·광주은행 실제 예금·연금 상품이며, 수령액은 세후 기준입니다.\n"
+            f"즉시연금형 예금({ann_pct:.0f}%): 목돈을 매월 원금+이자로 분할 수령 — 생활비 충당 핵심\n"
+            f"정기예금({dep_pct:.0f}%): 원금 보존하며 이자 수령 (예금자보호 1억)\n"
+            f"IRP({irp_pct:.0f}%): {age}세 기준 {irp_years}년 분할 수령 + 세액공제\n"
+            f"목표 생활비가 높을수록 즉시연금형 비중이 커지고, 여유로울수록 예금 비중이 커집니다."
         )
 
     elif total_capital > 0:
-        p_annuity   = _best("즉시연금")
-        annuity_net = int(total_capital * (1 - _ANNUITY_EXPENSE_RATIO))
-        alloc[f"{p_annuity.get('name','즉시연금')} ({p_annuity.get('bank','')})"] = total_capital
-        annuity_monthly = int(_annuity_pmt(annuity_net, _rate(p_annuity), annuity_years) * (1 - 0.055))
-        income[f"즉시연금 ({_rate(p_annuity)*100:.2f}%, {annuity_years}년, 세후)"] = annuity_monthly
-
+        p_annuity = _best("즉시연금형예금") or {}
+        ann_rate  = _rate(p_annuity)
+        ann_gross = _annuity_pmt(total_capital, ann_rate, annuity_years)
+        annuity_monthly = _split_taxed(ann_gross, total_capital, annuity_years * 12)
+        alloc[f"{p_annuity.get('name','JB 리치 100 정기예금 (즉시연금형)')} ({p_annuity.get('bank','전북은행')})"] = total_capital
+        income[f"즉시연금형 예금 ({ann_rate*100:.2f}%, {annuity_years}년, 세후)"] = annuity_monthly
         rationale = (
-            f"운용가능 자산 {total_capital:,}원이 1억 미만이므로 즉시연금 단일 상품에 집중합니다.\n"
-            f"세후(연금소득세 5.5% 차감) 및 사업비 차감 후 실수령 원금 {annuity_net:,}원 기준 {annuity_years}년 수령.\n"
-            f"국민연금이 사실상 주 수입원이 됩니다."
+            f"운용가능 자산 {total_capital:,}원을 전북은행 JB 리치 100 정기예금 즉시연금형에 집중,\n"
+            f"매월 원금+이자({annuity_years}년)를 분할 수령합니다. 국민연금이 주 수입원이 됩니다."
         )
     else:
         rationale = "운용가능 자산이 없습니다. 국민연금이 유일한 수입원입니다."
 
     if consulting_monthly > 0:
         income["자문료·급여"] = consulting_monthly
-        rationale += f"\n가업 승계 조건으로 자녀에게서 매월 {consulting_monthly:,}원의 자문료를 10년간 수령하여 기초 생활비를 보강합니다."
+        rationale += f"\n가업 승계 조건으로 자녀에게서 매월 {consulting_monthly:,}원의 자문료를 10년간 수령해 생활비를 보강합니다."
 
     if home_pension_monthly > 0:
         income["주택연금 (종신)"] = home_pension_monthly
@@ -230,12 +242,10 @@ def build_portfolio(total_capital: int, pension_monthly: int,
     projection = _long_term_projection(
         {"monthly_income": income, "allocation": alloc},
         annuity_years=annuity_years,
-        irp_years=irp_drawdown_years,
+        irp_years=irp_years,
         consulting_years=10,
     )
 
-    # 몬테카를로 생존 확률 (100세까지) — 목표 생활비에서 연금·자문료 수입을
-    # 뺀 순인출 기준, CPP 의료비 쇼크 포함 (tools/monte_carlo.py)
     mc_months = max((100 - age) * 12, 12)
     mc_mean, mc_std = _MC_PARAMS.get(risk_profile, _MC_PARAMS["balanced"])
     monte_carlo = run_retirement_mc(
@@ -256,8 +266,9 @@ def build_portfolio(total_capital: int, pension_monthly: int,
         "surplus_monthly":      income["합계"] - target_monthly,
         "long_term_projection": projection,
         "monte_carlo":          monte_carlo,
-        "risk_note": "펀드·연금 상품은 원금 손실 가능성이 있습니다. 가입 전 위험등급을 반드시 확인하세요.",
+        "risk_note": "전북은행·광주은행 예금 상품 위주로 예금자보호(1인 1억) 대상입니다. IRP는 원리금보장형 편입 시 보호되며, 운용형 선택 시 손실 가능성이 있습니다.",
     }
+
 
 
 def post_exit_wm_agent(state: AgentState) -> dict:
@@ -348,25 +359,25 @@ def post_exit_wm_agent(state: AgentState) -> dict:
             }
 
     # ── CPP 의료비 쇼크 몬테카를로 — 시나리오 간 동일 난수(CRN) 통제 비교 ──
-    # 수익률/변동성 가정: A 분산 포트폴리오 4.5%/6.0%, B 초안정 예금 3.0%/1.5%,
-    # C 혼합형 3.8%/4.0% (발표 모형 sim.py와 정렬)
+    # 전부 전북은행·광주은행 예금/연금형 실제 상품 기준이므로 저위험·저변동 가정.
+    # 운용자산이 클수록(매각) 예금 비중↑ → 변동성 소폭↑, 자문료가 있으면(승계) 초안정.
     mc_months = max((100 - age) * 12, 12)
     mc_specs = {
         "A": {
-            "k0": capital_sale, "annual_mean": 0.045, "annual_std": 0.060,
+            "k0": capital_sale, "annual_mean": 0.033, "annual_std": 0.012,
             "withdrawals": build_withdrawal_schedule(
                 target_monthly, pension, home_pension_m, 0, months=mc_months),
         },
     }
     if portfolio_succession:
         mc_specs["B"] = {
-            "k0": capital_succession, "annual_mean": 0.030, "annual_std": 0.015,
+            "k0": capital_succession, "annual_mean": 0.030, "annual_std": 0.010,
             "withdrawals": build_withdrawal_schedule(
                 target_monthly, pension, home_pension_m, consulting_fee_b, months=mc_months),
         }
     if portfolio_hybrid:
         mc_specs["C"] = {
-            "k0": capital_hybrid, "annual_mean": 0.038, "annual_std": 0.040,
+            "k0": capital_hybrid, "annual_mean": 0.031, "annual_std": 0.011,
             "withdrawals": build_withdrawal_schedule(
                 target_monthly, pension, home_pension_m, consulting_fee_c, months=mc_months),
         }

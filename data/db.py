@@ -8,8 +8,24 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "mock_data.db")
 
 
 def _ensure_db():
-    if not os.path.exists(DB_PATH):
-        from data.init_db import init_db
+    from data.init_db import init_db, DB_VERSION
+    need_rebuild = not os.path.exists(DB_PATH)
+    if not need_rebuild:
+        # 데이터 버전이 바뀌었으면(상품·후보 갱신 등) 자동 재생성
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            row = conn.execute("SELECT value FROM _meta WHERE key='version'").fetchone()
+            conn.close()
+            if not row or row[0] != DB_VERSION:
+                need_rebuild = True
+        except Exception:
+            need_rebuild = True
+        if need_rebuild:
+            try:
+                os.remove(DB_PATH)
+            except OSError:
+                pass
+    if need_rebuild:
         init_db()
 
 
