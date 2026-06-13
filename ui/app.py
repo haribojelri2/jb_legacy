@@ -392,6 +392,25 @@ def _run_compliance(text: str) -> tuple[bool, str]:
 
 
 
+def _won_short(amt) -> str:
+    """금액을 억/만원 단위로 압축 표시 (st.metric 값 잘림 방지). 예: 2,875,274 → '288만원'."""
+    a = int(round((amt or 0) / 10_000))   # 만원 단위 반올림
+    if a == 0:
+        return "0원"
+    eok, man = a // 10_000, a % 10_000
+    if eok and man:
+        return f"{eok}억 {man:,}만원"
+    if eok:
+        return f"{eok}억원"
+    return f"{man:,}만원"
+
+
+def _won_short_signed(amt) -> str:
+    """부호 포함 압축 표시 (목표 대비 증감 등). 예: -537,374 → '-54만원'."""
+    a = int(amt or 0)
+    return ("+" if a >= 0 else "-") + _won_short(abs(a))
+
+
 def _strip_md(text: str) -> str:
 
     text = re.sub(r'\*{1,3}', '', text)
@@ -550,7 +569,7 @@ def _tax_cards(tax: dict):
 
         st.markdown("##### 외부 매각 시")
 
-        st.metric("예상 세금", f"{sale.get('total_tax', 0):,}원")
+        st.metric("예상 세금", _won_short(sale.get('total_tax', 0)))
 
         st.caption("권리금 기타소득세 (필요경비 60% 공제)")
 
@@ -562,7 +581,7 @@ def _tax_cards(tax: dict):
 
         st.markdown("##### 가업승계 과세특례")
 
-        st.metric("예상 세금", f"{special.get('total_tax', 0):,}원",
+        st.metric("예상 세금", _won_short(special.get('total_tax', 0)),
 
                   delta=f"-{saving:,}원 절세" if saving > 0 else None,
 
@@ -636,13 +655,13 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
             surplus = scenario["surplus_monthly"]
 
-            st.metric("월 수령 합계", f"{m.get('합계',0):,}원",
+            st.metric("월 수령 합계", _won_short(m.get('합계', 0)),
 
-                      delta=f"목표 대비 {surplus:+,}원",
+                      delta=f"목표 대비 {_won_short_signed(surplus)}",
 
                       delta_color="normal" if surplus >= 0 else "inverse")
 
-            st.caption(f"운용자산: {scenario['total_capital']:,}원")
+            st.caption(f"운용자산: {_won_short(scenario['total_capital'])}")
 
             st.divider()
 
@@ -714,13 +733,13 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
                     st.caption(f"상권 트렌드: {cont['market_trend']} (연 {cont['annual_growth_rate']*100:+.0f}%)")
 
-                    st.metric("자녀 10년 누적 수익", f"{cont['daughter_cumulative_income']:,}원")
+                    st.metric("자녀 10년 누적 수익", _won_short(cont['daughter_cumulative_income']))
 
-                    st.metric("10년 후 권리금 추정", f"{cont['future_goodwill']:,}원",
+                    st.metric("10년 후 권리금 추정", _won_short(cont['future_goodwill']),
 
                               delta=f"{cont['future_grade']}")
 
-                    st.metric("가족 총자산 증가", f"{cont['family_asset_gain']:,}원")
+                    st.metric("가족 총자산 증가", _won_short(cont['family_asset_gain']))
 
                     m10 = cont["future_monthly_profit"]
 
@@ -764,8 +783,8 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            mc2.metric("중앙값 잔여자산 (100세)", f"{mc['median_final_capital']:,}원")
-            mc3.metric("하위 10% 시나리오", f"{mc['p10_final_capital']:,}원",
+            mc2.metric("중앙값 잔여자산 (100세)", _won_short(mc['median_final_capital']))
+            mc3.metric("하위 10% 시나리오", _won_short(mc['p10_final_capital']),
                        help="최악 10% 경우의 100세 잔여자산")
 
     # ── 시나리오별 생존 확률 곡선 + 고갈 연령 분포 (CPP 의료비 쇼크 모형) ──
@@ -858,7 +877,7 @@ def _negotiation_section(negotiation_result: dict):
 
     dc2.metric("자문료율", f"{cond.get('consulting_rate', 0)*100:.0f}%")
 
-    dc3.metric("월 자문료", f"{cond.get('consulting_monthly', 0):,}원")
+    dc3.metric("월 자문료", _won_short(cond.get('consulting_monthly', 0)))
 
     m = scenario.get("monthly_income", {})
 
@@ -875,7 +894,7 @@ def _negotiation_section(negotiation_result: dict):
         delta_color="normal" if surplus >= 0 else "inverse",
     )
 
-    mc2.metric("운용자산", f"{total_capital:,}원")
+    mc2.metric("운용자산", _won_short(total_capital))
 
     # 자산 배분 내역
     alloc = scenario.get("allocation", {})
@@ -921,12 +940,12 @@ def _negotiation_section(negotiation_result: dict):
 
             st.caption(f"상권 트렌드: {cont.get('market_trend', '보합')} (연 {cont.get('annual_growth_rate', 0)*100:+.0f}%)")
 
-            st.metric("자녀 10년 누적 수익", f"{cont.get('daughter_cumulative_income', 0):,}원")
+            st.metric("자녀 10년 누적 수익", _won_short(cont.get('daughter_cumulative_income', 0)))
 
-            st.metric("10년 후 권리금 추정", f"{cont.get('future_goodwill', 0):,}원",
+            st.metric("10년 후 권리금 추정", _won_short(cont.get('future_goodwill', 0)),
                       delta=cont.get("future_grade", ""))
 
-            st.metric("가족 총자산 증가", f"{cont.get('family_asset_gain', 0):,}원")
+            st.metric("가족 총자산 증가", _won_short(cont.get('family_asset_gain', 0)))
 
     proj = scenario.get("long_term_projection", {})
 
@@ -1157,9 +1176,9 @@ def _child_dashboard(result: dict | None):
 
     c1.metric("운영 기간", f"{biz.get('years_operating')}년")
 
-    c2.metric("월 순이익", f"{biz.get('monthly_profit', 0):,}원")
+    c2.metric("월 순이익", _won_short(biz.get('monthly_profit', 0)))
 
-    c3.metric("사업체 추정가치", f"{parent.get('total_business_value', 0):,}원")
+    c3.metric("사업체 추정가치", _won_short(parent.get('total_business_value', 0)))
 
     if result:
 
@@ -1436,7 +1455,7 @@ def _dynamic_valuation_section(user_id: str, monthly_profit: int = 0):
 
     vc1, vc2, vc3 = st.columns(3)
     with vc1:
-        st.metric("기존 단순 계산 권리금", f"{static:,}원",
+        st.metric("기존 단순 계산 권리금", _won_short(static),
                   help="월순이익 × 기준배수 (트렌드 미반영)")
     with vc2:
         st.metric(
@@ -1556,7 +1575,7 @@ def _fraud_guard_section(user_id: str):
     # ── 소비흐름 요약 (자산·연금·부동산·소비 통합 분석의 소비 축) ──
     sc1, sc2 = st.columns([1, 2])
     with sc1:
-        st.metric("월평균 생활 지출", f"{info['monthly_spend_normal']:,}원",
+        st.metric("월평균 생활 지출", _won_short(info['monthly_spend_normal']),
                   help=f"최근 {info['period_days']}일 정상 거래 기준 (이상거래 제외)")
         st.caption(f"최근 {info['period_days']}일 거래 {info['tx_count']}건 분석")
     with sc2:
@@ -1652,10 +1671,10 @@ def _contract_manager_section(result: dict):
     )
 
     cc1, cc2, cc3, cc4 = st.columns(4)
-    cc1.metric("월 자문료", f"{monthly:,}원")
-    cc2.metric("10년 총 수령 (세전)", f"{plan['total_gross']:,}원")
-    cc3.metric("10년 총 수령 (세후)", f"{plan['total_net']:,}원")
-    cc4.metric("연간 원천징수 추정", f"{plan['tax_annual_estimate']:,}원")
+    cc1.metric("월 자문료", _won_short(monthly))
+    cc2.metric("10년 총 수령 (세전)", _won_short(plan['total_gross']))
+    cc3.metric("10년 총 수령 (세후)", _won_short(plan['total_net']))
+    cc4.metric("연간 원천징수 추정", _won_short(plan['tax_annual_estimate']))
 
     with st.expander("생애주기 이벤트 타임라인"):
         for ev in plan["lifecycle_events"]:
