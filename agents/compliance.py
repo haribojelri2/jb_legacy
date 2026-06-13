@@ -28,9 +28,18 @@ def compliance_agent(state: AgentState) -> dict:
     if not response:
         return {"compliance_passed": True, "compliance_feedback": "✅ 검수 통과", "active_agents": ["ComplianceGuard"]}
 
-    llm = get_llm("fast")
+    llm = get_llm("smart")
     result = llm.invoke([
-        SystemMessage(content=f"금융·세무 소비자보호 전문가입니다.\n규칙:\n{_RULES}\n\n통과=PASS, 문제있으면=FAIL: [이유]"),
+        SystemMessage(content=(
+            "금융·세무 소비자보호 검수 담당입니다. 아래 5개 규칙을 의미 기준으로 판단하세요.\n"
+            f"{_RULES}\n"
+            "판단 지침:\n"
+            "- 표현이 달라도 의미가 충족되면 통과. 예: '세무사와 상담하세요'='세무사 상담 권장', "
+            "'예상/추정/약'='불확실성 명시', '원금이 줄 수 있다'='원금 손실 가능성'.\n"
+            "- '추천/유리하다'는 허용하며, '무조건 최선/반드시 이것'처럼 명백한 단정만 5번 위반으로 봅니다.\n"
+            "- 모든 규칙 충족 시 반드시 'PASS'만 출력. 하나라도 빠지면 'FAIL: [빠진 규칙]'.\n"
+            "확실하지 않으면 통과로 처리하세요(과도한 반려 금지)."
+        )),
         HumanMessage(content=f"검수 대상:\n{response}"),
     ]).content.strip()
 

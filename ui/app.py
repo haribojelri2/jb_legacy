@@ -319,7 +319,7 @@ def _followup_response(query: str, last_result: dict, history: list) -> str:
 
     llm = get_llm("smart", temperature=0.1)
 
-    return llm.invoke([
+    answer = llm.invoke([
 
         SystemMessage(content=(
 
@@ -327,11 +327,7 @@ def _followup_response(query: str, last_result: dict, history: list) -> str:
 
             "마크다운 기호(*, **, #, `)를 사용하지 마세요. 숫자는 정확히 인용하세요.\n"
 
-            "세금 수치는 반드시 '추정치'임을 명시하고 '세무사 상담을 권장합니다' 문구를 포함하세요.\n"
-
-            "투자 관련 내용은 '원금 손실 가능성이 있습니다'를 명시하세요.\n"
-
-            "최종 결정은 고객 본인 또는 담당 PB·세무사가 해야 함을 포함하세요.\n"
+            "특정 상품·시나리오를 '최선'이라고 단정하지 마세요(추천 정도는 가능).\n"
 
             "답변은 5~7줄 이내로."
 
@@ -341,8 +337,19 @@ def _followup_response(query: str, last_result: dict, history: list) -> str:
 
     ]).content
 
+    # 금소법 면책 고지를 코드로 강제 삽입 (LLM 누락 방지 → 검수 FAIL 루프 차단)
+    return answer.rstrip() + _COMPLIANCE_DISCLAIMER
 
 
+
+
+
+_COMPLIANCE_DISCLAIMER = (
+    "\n\n[유의사항]\n"
+    "본 내용의 세금·수익 수치는 추정치이며 실제와 다를 수 있습니다. 세무사 상담을 권장합니다. "
+    "투자·연금 상품은 원금 손실 가능성이 있으니 가입 전 위험등급을 확인하시기 바랍니다. "
+    "최종 결정은 고객 본인 또는 담당 PB·세무사가 함께 하시기 바랍니다."
+)
 
 
 _COMPLIANCE_RULES = """
@@ -1249,14 +1256,19 @@ def _child_dashboard(result: dict | None):
 
                         neg_out = negotiation_agent(neg_state)
 
-                        # D안 합의문도 금소법 검수 적용 (메인 플로우와 동일)
-                        _deal = neg_out.get("negotiation_result", {}).get("deal_summary", "")
+                        # D안 합의문에 면책 고지를 코드로 강제 삽입 후 검수 (FAIL 루프 방지)
+                        _nr = neg_out.get("negotiation_result", {})
+                        _deal = _nr.get("deal_summary", "")
 
                         if _deal:
 
+                            _deal = _deal.rstrip() + _COMPLIANCE_DISCLAIMER
+
+                            _nr["deal_summary"] = _deal
+
                             _ok, _fb = _run_compliance(_deal)
 
-                            neg_out["negotiation_result"]["compliance_feedback"] = _fb
+                            _nr["compliance_feedback"] = _fb
 
                     merged = {**result, **neg_out}
 
