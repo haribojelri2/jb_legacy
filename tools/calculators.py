@@ -13,6 +13,17 @@ _INCOME_TAX_BRACKETS = [
 ]
 
 
+def get_tax_bracket(taxable_income: int) -> tuple[float, int]:
+    """과세표준이 속한 종합소득세 구간의 (세율, 누진공제액) 반환.
+
+    표시용 세율표가 실제 계산과 어긋나지 않도록 단일 출처로 사용한다.
+    """
+    for limit, rate, deduction in _INCOME_TAX_BRACKETS:
+        if taxable_income <= limit:
+            return rate, deduction
+    return 0.45, 65_940_000
+
+
 def calc_income_tax(taxable_income: int) -> dict:
     """종합소득세 계산 (지방소득세 10% 포함)."""
     for limit, rate, deduction in _INCOME_TAX_BRACKETS:

@@ -1,7 +1,7 @@
 """Param Adjuster — 자연어 메시지에서 life_inputs 파라미터 변경을 감지·추출."""
 
 import os, json
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 
 _SYSTEM = """\
@@ -29,7 +29,7 @@ _SYSTEM = """\
 
 def detect_param_changes(query: str, current_life: dict) -> tuple[dict, str]:
     """(변경된 파라미터 dict, 변경 설명 str) 반환. 변경 없으면 ({}, "")."""
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
     resp = llm.invoke([
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=(

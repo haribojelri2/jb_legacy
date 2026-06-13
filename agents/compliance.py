@@ -1,7 +1,7 @@
 """Compliance Guard — 금소법 + 세무 면책 검수."""
 
 import os
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 
@@ -28,7 +28,7 @@ def compliance_agent(state: AgentState) -> dict:
     if not response:
         return {"compliance_passed": True, "compliance_feedback": "✅ 검수 통과", "active_agents": ["ComplianceGuard"]}
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
     result = llm.invoke([
         SystemMessage(content=f"금융·세무 소비자보호 전문가입니다.\n규칙:\n{_RULES}\n\n통과=PASS, 문제있으면=FAIL: [이유]"),
         HumanMessage(content=f"검수 대상:\n{response}"),

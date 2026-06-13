@@ -3,3 +3,10 @@ gatherUsageStats = false
 
 [server]
 headless = true
+
+[theme]
+# JB금융그룹 브랜드 톤 — 기본 빨간 액센트 대신 신뢰감 있는 블루
+primaryColor = "#0F4C9A"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6FA"
+textColor = "#111827"

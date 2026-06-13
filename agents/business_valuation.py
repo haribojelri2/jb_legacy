@@ -1,7 +1,7 @@
 """Business Valuation Agent — 사업체 가치·권리금 산정."""
 
 import os
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from tools.calculators import estimate_business_value
@@ -26,7 +26,7 @@ def business_valuation_agent(state: AgentState) -> dict:
         "합계": total_value,
     }
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
     summary = llm.invoke([
         SystemMessage(content="사업체 가치평가 전문가입니다. 계산 결과를 자영업자 눈높이로 쉽게 설명하세요."),
         HumanMessage(content=(

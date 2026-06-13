@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime, timedelta
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 
@@ -53,7 +53,7 @@ def booking_agent(state: AgentState) -> dict:
         "prep_docs": ["사업자등록증", "최근 3년 소득세 신고서", "임대차계약서", "신분증"],
     }
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
     confirm_msg = llm.invoke([
         SystemMessage(content=_BOOK_SYSTEM),
         HumanMessage(content=(

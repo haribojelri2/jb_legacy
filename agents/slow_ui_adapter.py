@@ -1,7 +1,7 @@
 """Slow UI Adapter — 어르신 UI용 응답 포맷 변환."""
 
 import os
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 
@@ -14,7 +14,7 @@ def slow_ui_adapter(state: AgentState) -> dict:
     if not raw:
         return {}
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
     adapted = llm.invoke([
         SystemMessage(content=(
             "62세 자영업자 어르신과 대화하는 친절한 금융 도우미입니다.\n"

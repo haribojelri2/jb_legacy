@@ -10,3 +10,9 @@ build/
 .venv/
 venv/
 rag/chroma_db/
+
+# 런타임 생성 파일
+jb_legacy_memory.db
+data/mock_data.db
+.pytest_cache/
+streamlit*.log

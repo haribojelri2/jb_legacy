@@ -1,7 +1,7 @@
 """Profiler — 사용자 프로필 로드 + 핵심 정보 누락 시 추가 질문 생성."""
 
 import os
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from data.mock_data import USERS
@@ -39,7 +39,7 @@ def profiler_agent(state: AgentState) -> dict:
 
     missing = [h for f, h in _REQUIRED_BIZ.items() if not biz.get(f)]
     if missing:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+        llm = get_llm("fast")
         known = (
             f"월순이익: {biz.get('monthly_profit','미확인')}, "
             f"운영기간: {biz.get('years_operating','미확인')}년, "

@@ -1,57 +1,16 @@
 """Post-Exit WM Agent — 3가지 시나리오별 노후 현금흐름 비교 (JB 실제 상품 기반)."""
 
-import os
-import math
-import random
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from agents.llm import get_llm
 from agents.state import AgentState
 from tools.calculators import calc_goodwill_tax, estimate_business_value, calc_business_continuity
+from tools.monte_carlo import (
+    build_withdrawal_schedule,
+    run_retirement_mc,
+    run_scenario_comparison,
+)
 from data.jb_products import JB_PRODUCTS, get_products_for_retirement
 
-
-def calc_survival_probability(
-    total_capital: int,
-    monthly_withdrawal: int,
-    current_age: int = 62,
-    target_age: int = 100,
-    annual_return_mean: float = 0.05,
-    annual_return_std: float = 0.10,
-    simulations: int = 1000,
-) -> dict:
-    """몬테카를로 시뮬레이션 기반 은퇴 자산 생존 확률 계산."""
-    if total_capital <= 0 or monthly_withdrawal <= 0:
-        return {}
-    years  = max(target_age - current_age, 1)
-    months = years * 12
-    # 월 수익률 파라미터 (연율 → 월율 변환)
-    monthly_mean = (1 + annual_return_mean) ** (1 / 12) - 1
-    monthly_std  = annual_return_std / math.sqrt(12)
-
-    survived      = 0
-    final_caps    = []
-    for _ in range(simulations):
-        cap = float(total_capital)
-        for _ in range(months):
-            ret = random.gauss(monthly_mean, monthly_std)
-            cap = cap * (1 + ret) - monthly_withdrawal
-            if cap <= 0:
-                cap = 0
-                break
-        final_caps.append(cap)
-        if cap > 0:
-            survived += 1
-
-    final_caps.sort()
-    return {
-        "survival_probability":  round(survived / simulations * 100, 1),
-        "simulations":           simulations,
-        "years":                 years,
-        "target_age":            target_age,
-        "median_final_capital":  int(final_caps[simulations // 2]),
-        "p10_final_capital":     int(final_caps[simulations // 10]),
-        "monthly_withdrawal":    monthly_withdrawal,
-    }
 
 # 카탈로그에서 카테고리별 최적 상품(최고 수익률) 선택
 def _best(category_keyword: str) -> dict:
@@ -181,6 +140,13 @@ _ALLOC_RATIO = {
     "growth":       {"fund": 0.45, "annuity": 0.20, "deposit": 0.20, "irp": 0.15},
 }
 
+# risk_profile별 몬테카를로 가정 (연평균 수익률, 연 변동성)
+_MC_PARAMS = {
+    "conservative": (0.030, 0.015),   # 초안정 예금 위주
+    "balanced":     (0.038, 0.040),   # 혼합형
+    "growth":       (0.045, 0.060),   # 분산 투자형
+}
+
 
 def build_portfolio(total_capital: int, pension_monthly: int,
                      consulting_monthly: int = 0, annuity_years: int = 10,
@@ -268,11 +234,18 @@ def build_portfolio(total_capital: int, pension_monthly: int,
         consulting_years=10,
     )
 
-    # 몬테카를로 생존 확률 (월 수령 합계 기준, 100세까지)
-    total_monthly = income.get("합계", 0)
-    monte_carlo = calc_survival_probability(
-        total_capital, total_monthly, age, 100
-    ) if total_capital > 0 and total_monthly > 0 else {}
+    # 몬테카를로 생존 확률 (100세까지) — 목표 생활비에서 연금·자문료 수입을
+    # 뺀 순인출 기준, CPP 의료비 쇼크 포함 (tools/monte_carlo.py)
+    mc_months = max((100 - age) * 12, 12)
+    mc_mean, mc_std = _MC_PARAMS.get(risk_profile, _MC_PARAMS["balanced"])
+    monte_carlo = run_retirement_mc(
+        total_capital, mc_mean, mc_std,
+        build_withdrawal_schedule(
+            target_monthly, pension_monthly, home_pension_monthly,
+            consulting_monthly, months=mc_months,
+        ),
+        start_age=age, months=mc_months,
+    ) if total_capital > 0 else {}
 
     return {
         "total_capital":        total_capital,
@@ -374,6 +347,38 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                                                + continuity_half["future_goodwill"] // 2),
             }
 
+    # ── CPP 의료비 쇼크 몬테카를로 — 시나리오 간 동일 난수(CRN) 통제 비교 ──
+    # 수익률/변동성 가정: A 분산 포트폴리오 4.5%/6.0%, B 초안정 예금 3.0%/1.5%,
+    # C 혼합형 3.8%/4.0% (발표 모형 sim.py와 정렬)
+    mc_months = max((100 - age) * 12, 12)
+    mc_specs = {
+        "A": {
+            "k0": capital_sale, "annual_mean": 0.045, "annual_std": 0.060,
+            "withdrawals": build_withdrawal_schedule(
+                target_monthly, pension, home_pension_m, 0, months=mc_months),
+        },
+    }
+    if portfolio_succession:
+        mc_specs["B"] = {
+            "k0": capital_succession, "annual_mean": 0.030, "annual_std": 0.015,
+            "withdrawals": build_withdrawal_schedule(
+                target_monthly, pension, home_pension_m, consulting_fee_b, months=mc_months),
+        }
+    if portfolio_hybrid:
+        mc_specs["C"] = {
+            "k0": capital_hybrid, "annual_mean": 0.038, "annual_std": 0.040,
+            "withdrawals": build_withdrawal_schedule(
+                target_monthly, pension, home_pension_m, consulting_fee_c, months=mc_months),
+        }
+    mc_comparison = run_scenario_comparison(mc_specs, start_age=age, months=mc_months)
+    # 각 포트폴리오의 생존확률을 통제 비교 결과로 교체 (동일 난수 기준)
+    if mc_comparison.get("A"):
+        portfolio_sale["monte_carlo"] = mc_comparison["A"]
+    if portfolio_succession and mc_comparison.get("B"):
+        portfolio_succession["monte_carlo"] = mc_comparison["B"]
+    if portfolio_hybrid and mc_comparison.get("C"):
+        portfolio_hybrid["monte_carlo"] = mc_comparison["C"]
+
     scenario_b_text = ""
     scenario_c_text = ""
     if portfolio_succession and continuity_full:
@@ -402,7 +407,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
             )
         )
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.1, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("smart", temperature=0.1)
     advice = llm.invoke([
         SystemMessage(content=(
             "JB금융그룹 은퇴 전문 PB입니다.\n"
@@ -428,6 +433,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
         "scenario_sale":       portfolio_sale,
         "scenario_succession": portfolio_succession,
         "scenario_hybrid":     portfolio_hybrid,
+        "monte_carlo_comparison": mc_comparison,
         "advice": advice,
     }
 

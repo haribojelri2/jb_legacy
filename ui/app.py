@@ -33,15 +33,24 @@ from agents.early_warning import calc_health_score
 from agents.dynamic_valuation import calc_dynamic_goodwill
 from agents.youth_matching import get_youth_matching_info
 from agents.contract_manager import build_contract_plan
+from agents.fraud_guard import analyze_transactions, build_family_alert
 from agents.gan_tester import GANTester, TestReport
 
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 
 
 st.set_page_config(page_title="JB Legacy", page_icon="🏮", layout="wide")
+
+# API 키 가드 — 분석 도중 깊은 곳에서 터지지 않도록 시작 시점에 명확히 중단
+if not os.getenv("OPENAI_API_KEY"):
+    st.error(
+        "OPENAI_API_KEY가 설정되지 않았습니다. "
+        "프로젝트 루트의 .env 파일에 키를 입력한 뒤 다시 실행해 주세요 (.env.example 참고)."
+    )
+    st.stop()
 
 
 
@@ -173,7 +182,7 @@ _TARGET_OPTS = {
 
 def _is_analysis_request(query: str) -> bool:
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
 
     resp = llm.invoke([HumanMessage(content=(
 
@@ -197,7 +206,7 @@ def _is_analysis_request(query: str) -> bool:
 
 def _is_followup(query: str) -> bool:
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
 
     resp = llm.invoke([HumanMessage(content=(
 
@@ -297,7 +306,7 @@ def _followup_response(query: str, last_result: dict, history: list) -> str:
 
     context = "\n\n".join(context_parts)
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.1, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("smart", temperature=0.1)
 
     return llm.invoke([
 
@@ -345,7 +354,7 @@ _COMPLIANCE_RULES = """
 
 def _run_compliance(text: str) -> tuple[bool, str]:
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
 
     result = llm.invoke([
 
@@ -376,6 +385,78 @@ def _strip_md(text: str) -> str:
     text = re.sub(r'_{1,2}', '', text)
 
     return text.strip()
+
+
+
+
+def _scenario_snapshot(result: dict) -> dict:
+
+    """시나리오별 (월수령, 생존확률) 캡처 — what-if 변경 전후 비교용."""
+
+    snap = {}
+
+    if not result:
+
+        return snap
+
+    portfolio = result.get("retirement_portfolio", {})
+
+    pairs = [
+        ("A안", portfolio.get("scenario_sale")),
+        ("B안", portfolio.get("scenario_succession")),
+        ("C안", portfolio.get("scenario_hybrid")),
+        ("D안", result.get("negotiation_result", {}).get("scenario_negotiated")),
+    ]
+
+    for label, s in pairs:
+
+        if not s:
+
+            continue
+
+        snap[label] = {
+            "monthly":  s.get("monthly_income", {}).get("합계", 0),
+            "survival": s.get("monte_carlo", {}).get("survival_probability"),
+        }
+
+    return snap
+
+
+
+
+def _build_whatif_diff(before: dict, after: dict) -> str:
+
+    """변경 전후 수치 비교 블록 생성. 비교 대상 없으면 빈 문자열."""
+
+    if not before or not after:
+
+        return ""
+
+    lines = []
+
+    for label, b in before.items():
+
+        a = after.get(label)
+
+        if not a:
+
+            continue
+
+        d_m = a["monthly"] - b["monthly"]
+
+        line = f"{label} 월수령 {b['monthly']:,}원 → {a['monthly']:,}원 ({d_m:+,}원)"
+
+        if b.get("survival") is not None and a.get("survival") is not None:
+
+            line += f" / 생존확률 {b['survival']}% → {a['survival']}%"
+
+        lines.append(line)
+
+    if not lines:
+
+        return ""
+
+    return "\n\n[변경 전후 비교]\n" + "\n".join(lines)
 
 
 
@@ -659,7 +740,7 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
             mc1.markdown(
                 f'<div style="background:#f9fafb;border:2px solid {sp_color};border-radius:10px;'
                 f'padding:14px;text-align:center">'
-                f'<div style="font-size:11px;color:#6b7280">📊 몬테카를로 은퇴 생존 확률</div>'
+                f'<div style="font-size:11px;color:#6b7280">몬테카를로 은퇴 생존 확률</div>'
                 f'<div style="font-size:28px;font-weight:700;color:{sp_color}">{sp}%</div>'
                 f'<div style="font-size:11px;color:#9ca3af">{mc["simulations"]:,}회 시뮬레이션 · {mc["target_age"]}세까지</div>'
                 f'</div>',
@@ -669,7 +750,50 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
             mc3.metric("하위 10% 시나리오", f"{mc['p10_final_capital']:,}원",
                        help="최악 10% 경우의 100세 잔여자산")
 
-    st.caption("⚠️ 펀드·연금 상품은 원금 손실 가능성이 있습니다. B안은 순수익 20%, C안은 순수익 10%를 자녀에게서 10년간 자문료로 수취하는 현실적 타협안을 가정했습니다.")
+    # ── 시나리오별 생존 확률 곡선 + 고갈 연령 분포 (CPP 의료비 쇼크 모형) ──
+    mc_comp = portfolio.get("monte_carlo_comparison", {})
+    _curves = {
+        f"{label}안": data["survival_curve"]
+        for label, data in mc_comp.items()
+        if not label.startswith("_") and data
+    }
+    if _curves:
+        import pandas as pd
+        st.markdown(
+            '<p class="section-label" style="margin-top:24px">은퇴 자산 생존 확률 — '
+            '의료비 쇼크 몬테카를로'
+            '<span style="font-size:10px;background:#ede9fe;color:#5b21b6;'
+            'padding:2px 6px;border-radius:4px;margin-left:6px">CPP 모형</span></p>',
+            unsafe_allow_html=True,
+        )
+        ch1, ch2 = st.columns(2)
+        with ch1:
+            curve_df = pd.DataFrame({k: pd.Series(v) for k, v in _curves.items()})
+            curve_df.index.name = "나이"
+            st.line_chart(curve_df, x_label="나이(세)", y_label="생존 확률(%)", height=260)
+            st.caption("연령별 자산 미고갈 확률 (시나리오 간 동일 난수 통제 비교)")
+        with ch2:
+            ruin_df = pd.DataFrame({
+                f"{label}안": data["ruin_age_brackets"]
+                for label, data in mc_comp.items()
+                if not label.startswith("_") and data
+            })
+            st.bar_chart(ruin_df, x_label="고갈 연령 구간", y_label="고갈 확률(%)", height=260)
+            st.caption("자산 고갈 시점 분포 (구간별 %)")
+        _model = mc_comp.get("_model", {})
+        with st.expander("의료비 쇼크 모형 설명"):
+            st.caption(
+                "복합 포아송 과정(CPP): 긴급 의료비가 연평균 "
+                f"{_model.get('lam_annual', 0.25)}회(4년에 1회 꼴) 발생, "
+                f"1회 평균 {_model.get('avg_shock', 30_000_000):,}원(지수분포) 지출을 가정합니다. "
+                f"{_model.get('sims', 1000):,}회 경로 시뮬레이션이며, "
+                "모든 시나리오가 동일한 시장 국면과 쇼크 타이밍을 겪도록 통제(CRN)했습니다. "
+                "순인출액 = 목표 생활비 − (국민연금 + 주택연금 + 자문료) 기준이고, "
+                "수익률 가정은 A 연 4.5%(변동성 6.0%), B 3.0%(1.5%), C 3.8%(4.0%)입니다. "
+                "주택연금 활용·목표 생활비 조정 시 생존 확률이 크게 달라집니다."
+            )
+
+    st.caption("유의: 펀드·연금 상품은 원금 손실 가능성이 있습니다. B안은 순수익 20%, C안은 순수익 10%를 자녀에게서 10년간 자문료로 수취하는 현실적 타협안을 가정했습니다.")
 
 
 
@@ -706,7 +830,7 @@ def _negotiation_section(negotiation_result: dict):
             f'<div style="background:#f0fdf4;border-left:4px solid #16a34a;'
             f'padding:12px 16px;border-radius:0 8px 8px 0;font-size:14px;'
             f'color:#14532d;margin-bottom:16px">'
-            f'💬 이과장의 한마디: <em>"{msg}"</em></div>',
+            f'이과장의 한마디: <em>"{msg}"</em></div>',
             unsafe_allow_html=True,
         )
 
@@ -762,6 +886,14 @@ def _negotiation_section(negotiation_result: dict):
             f'<div class="rationale-box" style="margin-top:12px">{summary}</div>',
             unsafe_allow_html=True,
         )
+
+        _neg_cfb = negotiation_result.get("compliance_feedback", "")
+
+        if _neg_cfb:
+
+            _neg_cls = "compliance-ok" if _neg_cfb.startswith("✅") else "compliance-err"
+
+            st.markdown(f'<p class="{_neg_cls}">{_neg_cfb.replace("✅", "").replace("⚠️", "").strip()}</p>', unsafe_allow_html=True)
 
     cont = scenario.get("business_continuity", {})
 
@@ -891,7 +1023,7 @@ def _response_section(final: str, is_slow: bool, sections: dict):
 
     if sections.get("주의사항"):
 
-        st.caption(f"⚠️ {sections['주의사항']}")
+        st.caption(f"유의사항: {sections['주의사항']}")
 
 
 
@@ -1042,6 +1174,15 @@ def _child_dashboard(result: dict | None):
 
                         neg_out = negotiation_agent(neg_state)
 
+                        # D안 합의문도 금소법 검수 적용 (메인 플로우와 동일)
+                        _deal = neg_out.get("negotiation_result", {}).get("deal_summary", "")
+
+                        if _deal:
+
+                            _ok, _fb = _run_compliance(_deal)
+
+                            neg_out["negotiation_result"]["compliance_feedback"] = _fb
+
                     merged = {**result, **neg_out}
 
                     st.session_state["last_result"]  = merged
@@ -1065,8 +1206,8 @@ def _child_dashboard(result: dict | None):
 def _voice_briefing_section(final_response: str):
     """OpenAI TTS 기반 AI PB 음성 브리핑 — 시니어 배리어 프리 UI."""
     import io
-    st.markdown('<p class="section-label">🔊 AI PB 음성 브리핑 <span style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:4px;margin-left:6px">시니어 UI</span></p>', unsafe_allow_html=True)
-    if st.button("🔊 AI PB의 음성 브리핑 듣기", use_container_width=True, key="tts_btn"):
+    st.markdown('<p class="section-label">AI PB 음성 브리핑 <span style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:4px;margin-left:6px">시니어 UI</span></p>', unsafe_allow_html=True)
+    if st.button("AI PB의 음성 브리핑 듣기", use_container_width=True, key="tts_btn"):
         with st.spinner("음성 생성 중... (약 5~10초)"):
             from openai import OpenAI
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -1080,11 +1221,10 @@ def _voice_briefing_section(final_response: str):
             )
             audio_bytes = io.BytesIO(speech.content)
         st.audio(audio_bytes, format="audio/mp3", autoplay=False)
-        st.caption("⚠️ 본 음성 브리핑은 AI가 생성한 참고용 정보입니다. 최종 결정은 담당 PB·세무사와 상담하시기 바랍니다.")
+        st.caption("본 음성 브리핑은 AI가 생성한 참고용 정보입니다. 최종 결정은 담당 PB·세무사와 상담하시기 바랍니다.")
 
 
 _GRADE_COLOR = {"정상": "#16a34a", "주의": "#f59e0b", "경보": "#dc2626"}
-_GRADE_ICON  = {"정상": "✅", "주의": "⚠️", "경보": "🚨"}
 
 
 def _early_warning_section(user_id: str, monthly_profit: int = 0):
@@ -1094,16 +1234,15 @@ def _early_warning_section(user_id: str, monthly_profit: int = 0):
         return
 
     st.markdown(
-        '<p class="section-label">📊 경영 건강 대시보드 '
+        '<p class="section-label">경영 건강 대시보드 '
         '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
-        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        'padding:2px 6px;border-radius:4px;margin-left:6px">데모 데이터</span></p>',
         unsafe_allow_html=True,
     )
 
     score   = health["overall_score"]
     grade   = health["overall_grade"]
     gcolor  = _GRADE_COLOR[grade]
-    gicon   = _GRADE_ICON[grade]
 
     sc1, sc2, sc3 = st.columns([1, 2, 1])
     with sc1:
@@ -1112,7 +1251,7 @@ def _early_warning_section(user_id: str, monthly_profit: int = 0):
             f'border-radius:12px;border:2px solid {gcolor}">'
             f'<div style="font-size:32px;font-weight:700;color:{gcolor}">{score}</div>'
             f'<div style="font-size:11px;color:#6b7280">종합 건강점수</div>'
-            f'<div style="font-size:18px;font-weight:700;color:{gcolor}">{gicon} {grade}</div>'
+            f'<div style="font-size:18px;font-weight:700;color:{gcolor}">{grade}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1124,7 +1263,7 @@ def _early_warning_section(user_id: str, monthly_profit: int = 0):
                 f'font-size:13px;margin:4px 0">'
                 f'<span style="color:#374151">{name}</span>'
                 f'<span style="color:{fc};font-weight:600">'
-                f'{_GRADE_ICON[fdata["grade"]]} {fdata["grade"]}  {fdata["value"]}'
+                f'{fdata["grade"]}  {fdata["value"]}'
                 f'</span></div>',
                 unsafe_allow_html=True,
             )
@@ -1183,7 +1322,7 @@ def _early_warning_section(user_id: str, monthly_profit: int = 0):
             tc3.metric("전년 대비", f"{trend['yoy_change_pct']:+.1f}%",
                        delta_color="normal" if trend['yoy_change_pct'] > 0 else "inverse")
 
-    st.caption("⚠️ 본 데이터는 데모용 시뮬레이션입니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
+    st.caption("본 데이터는 데모용 시뮬레이션입니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
 
 
 _TIMING_COLOR = {"정상": "#16a34a", "주의": "#f59e0b", "경보": "#dc2626"}
@@ -1196,9 +1335,9 @@ def _dynamic_valuation_section(user_id: str, monthly_profit: int = 0):
         return
 
     st.markdown(
-        '<p class="section-label">💰 권리금 동적 평가 & 엑시트 타이밍 '
+        '<p class="section-label">권리금 동적 평가 & 엑시트 타이밍 '
         '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
-        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        'padding:2px 6px;border-radius:4px;margin-left:6px">데모 데이터</span></p>',
         unsafe_allow_html=True,
     )
 
@@ -1227,7 +1366,7 @@ def _dynamic_valuation_section(user_id: str, monthly_profit: int = 0):
             f'<div style="font-size:16px;font-weight:700;color:{tc}">'
             f'{timing["recommendation"]}</div>'
             f'<div style="font-size:11px;color:{tc};margin-top:4px">'
-            f'{_GRADE_ICON[timing["urgency"]]} {timing["urgency"]}</div>'
+            f'{timing["urgency"]}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1253,10 +1392,10 @@ def _dynamic_valuation_section(user_id: str, monthly_profit: int = 0):
             )
         st.caption(f"적용 월순이익: {dv['monthly_profit_applied']:,}원 / 매출 추세: {dv['trend_direction']}")
 
-    st.caption("⚠️ 본 권리금은 추정치입니다. 정확한 평가는 공인중개사·세무사 상담을 받으시기 바랍니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
+    st.caption("본 권리금은 추정치입니다. 정확한 평가는 공인중개사·세무사 상담을 받으시기 바랍니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
 
 
-_STAR = "⭐"
+_STAR = "★"
 
 
 def _youth_matching_section(user_id: str):
@@ -1266,9 +1405,9 @@ def _youth_matching_section(user_id: str):
         return
 
     st.markdown(
-        '<p class="section-label">🤝 청년 창업가 매칭 & JB 인수 대출 '
+        '<p class="section-label">청년 창업가 매칭 & JB 인수 대출 '
         '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
-        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        'padding:2px 6px;border-radius:4px;margin-left:6px">데모 데이터</span></p>',
         unsafe_allow_html=True,
     )
 
@@ -1310,10 +1449,82 @@ def _youth_matching_section(user_id: str):
             st.markdown(f'<div style="font-size:13px;color:#374151;margin:4px 0">{step}</div>',
                         unsafe_allow_html=True)
 
-    st.caption("⚠️ 매칭 후보는 데모용 시뮬레이션입니다. 본선에서 JB카드 청년 창업 대출 DB 연동 예정.")
+    st.caption("매칭 후보는 데모용 시뮬레이션입니다. 본선에서 JB카드 청년 창업 대출 DB 연동 예정.")
 
 
-_CONTRACT_EVENT_ICON = {"start": "🟣", "tax": "🟡", "review": "🔵", "pension": "🟢", "end": "⚫"}
+def _fraud_guard_section(user_id: str):
+    """이상거래 탐지 + 소비흐름 분석 + 가족 알림 — 독립 패널 (DEMO MOCK)."""
+    info = analyze_transactions(user_id)
+    if not info:
+        st.caption("분석할 거래내역이 없습니다.")
+        return
+
+    st.markdown(
+        '<p class="section-label">거래 안심 — 소비흐름 & 이상거래 감시 '
+        '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">데모 데이터</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 소비흐름 요약 (자산·연금·부동산·소비 통합 분석의 소비 축) ──
+    sc1, sc2 = st.columns([1, 2])
+    with sc1:
+        st.metric("월평균 생활 지출", f"{info['monthly_spend_normal']:,}원",
+                  help=f"최근 {info['period_days']}일 정상 거래 기준 (이상거래 제외)")
+        st.caption(f"최근 {info['period_days']}일 거래 {info['tx_count']}건 분석")
+    with sc2:
+        import pandas as pd
+        cat_df = pd.DataFrame({"월평균 지출(원)": info["category_monthly"]})
+        st.bar_chart(cat_df, horizontal=True, height=220)
+
+    # ── 이상거래 경보 ──
+    alerts = info["alerts"]
+    if not alerts:
+        st.success(f"최근 {info['period_days']}일 동안 평소와 다른 거래가 발견되지 않았습니다.")
+        return
+
+    st.markdown(
+        f'<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:10px;'
+        f'padding:12px 16px;margin:10px 0;font-size:14px;color:#991b1b;font-weight:700">'
+        f'평소와 다른 거래 {len(alerts)}건이 감지되었습니다 '
+        f'(합계 {sum(a["amount"] for a in alerts):,}원)</div>',
+        unsafe_allow_html=True,
+    )
+
+    for a in alerts:
+        chips = " ".join(
+            f'<span style="font-size:10px;background:#fee2e2;color:#991b1b;'
+            f'padding:2px 6px;border-radius:4px;margin-right:4px">{r}</span>'
+            for r in a["reasons"]
+        )
+        risk_color = "#dc2626" if a["risk"] == "높음" else "#f59e0b"
+        st.markdown(
+            f'<div style="border:1px solid #e5e7eb;border-left:4px solid {risk_color};'
+            f'border-radius:8px;padding:10px 14px;margin-bottom:8px">'
+            f'<div style="font-size:13px;font-weight:700">{a["merchant"]} — {a["amount"]:,}원 '
+            f'<span style="color:{risk_color}">[위험도 {a["risk"]}]</span></div>'
+            f'<div style="font-size:11px;color:#6b7280">{a["day_offset"]}일 전 {a["tx_time"]} · {a["channel"]}</div>'
+            f'<div style="margin-top:6px">{chips}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 가족 알림 (FamilyBridge 연계 스토리) ──
+    sent_key = f"fraud_alert_sent_{user_id}"
+    if st.session_state.get(sent_key):
+        st.success("자녀(이과장)에게 이상거래 알림이 전송되었습니다.")
+        with st.expander("전송된 알림 내용"):
+            st.text(build_family_alert(USERS.get(user_id, {}), alerts))
+    elif st.button("자녀(이과장)에게 이상거래 알림 보내기",
+                   use_container_width=True, key="fraud_alert_btn", type="primary"):
+        st.session_state[sent_key] = True
+        st.rerun()
+
+    st.caption("거래내역·탐지 결과는 데모용 시뮬레이션입니다. 본선에서 JB은행 실시간 FDS 연동 예정. "
+               "보이스피싱 의심 시 지급정지 요청: 전북은행 063-250-5000 / 경찰청 112")
+
+
+_CONTRACT_EVENT_ICON = {"start": "●", "tax": "●", "review": "●", "pension": "●", "end": "●"}
 
 
 def _contract_manager_section(result: dict):
@@ -1341,9 +1552,9 @@ def _contract_manager_section(result: dict):
 
     st.divider()
     st.markdown(
-        '<p class="section-label">📅 10년 자문료 자동이체 & 생애주기 알림 '
+        '<p class="section-label">10년 자문료 자동이체 & 생애주기 알림 '
         '<span style="font-size:10px;background:#fef3c7;color:#92400e;'
-        'padding:2px 6px;border-radius:4px;margin-left:6px">🧪 데모 데이터</span></p>',
+        'padding:2px 6px;border-radius:4px;margin-left:6px">데모 데이터</span></p>',
         unsafe_allow_html=True,
     )
 
@@ -1383,22 +1594,22 @@ def _contract_manager_section(result: dict):
     st.markdown(
         f'<div style="background:#eff6ff;border:1px solid #93c5fd;'
         f'padding:10px 14px;border-radius:8px;font-size:12px;color:#1e3a5f">'
-        f'🏦 {plan["jb_auto_transfer_note"]}</div>',
+        f'{plan["jb_auto_transfer_note"]}</div>',
         unsafe_allow_html=True,
     )
-    st.caption("⚠️ 자문료 세금은 추정치입니다. 본선에서 JB은행 자동이체 API 연동 예정.")
+    st.caption("자문료 세금은 추정치입니다. 본선에서 JB은행 자동이체 API 연동 예정.")
 
 
 _SEVERITY_COLOR = {"심각": "#dc2626", "보통": "#f59e0b", "경미": "#6b7280"}
-_SEVERITY_ICON  = {"심각": "🔴", "보통": "🟡", "경미": "⚪"}
+_SEVERITY_ICON  = {"심각": "", "보통": "", "경미": ""}
 _VERDICT_COLOR  = {"통과": "#16a34a", "조건부통과": "#f59e0b", "재생성필요": "#dc2626"}
-_VERDICT_ICON   = {"통과": "✅", "조건부통과": "⚠️", "재생성필요": "❌"}
+_VERDICT_ICON   = {"통과": "", "조건부통과": "", "재생성필요": ""}
 
 
 def _gan_test_section(result: dict | None):
     """GAN 스타일 AI 응답 품질 테스트 — Critic · Defender · Judge."""
     st.markdown(
-        '<p class="section-label">🧪 GAN 품질 테스트 '
+        '<p class="section-label">GAN 품질 테스트 '
         '<span style="font-size:10px;background:#ede9fe;color:#5b21b6;'
         'padding:2px 6px;border-radius:4px;margin-left:6px">Critic vs Defender vs Judge</span></p>',
         unsafe_allow_html=True,
@@ -1423,7 +1634,7 @@ def _gan_test_section(result: dict | None):
         rounds = st.selectbox("토론 라운드", [1, 2], index=0, key="gan_rounds")
     with col_btn:
         st.markdown("")
-        run_btn = st.button("🚀 GAN 테스트 시작", type="primary", use_container_width=True, key="gan_run")
+        run_btn = st.button("GAN 테스트 시작", type="primary", use_container_width=True, key="gan_run")
 
     # 이전 결과 캐시 — 같은 응답+라운드면 재실행 안 함
     cache_key = f"{hash(final_response)}_{rounds}"
@@ -1432,7 +1643,7 @@ def _gan_test_section(result: dict | None):
     if run_btn and not cached_report:
         progress_ph = st.empty()
         with st.spinner("GAN 테스트 진행 중... (약 30~60초)"):
-            progress_ph.info("🔴 공격자(Critic) 분석 중...")
+            progress_ph.info("공격자(Critic) 분석 중...")
             tester = GANTester(rounds=rounds)
             report = tester.run(query=query, ai_response=final_response)
         progress_ph.empty()
@@ -1507,7 +1718,7 @@ def _gan_test_section(result: dict | None):
     # ── 토론 과정 ─────────────────────────────────────────────────────────
     for rd in report.rounds:
         with st.expander(f"Round {rd.round_num} — 공격 vs 방어 상세"):
-            st.markdown("**🔴 공격자 (Critic)**")
+            st.markdown("**공격자 (Critic)**")
             for p in rd.critique.points:
                 sev_c = _SEVERITY_COLOR.get(p.severity, "#888")
                 sev_i = _SEVERITY_ICON.get(p.severity, "")
@@ -1529,7 +1740,7 @@ def _gan_test_section(result: dict | None):
             )
 
             st.markdown("")
-            st.markdown("**🔵 방어자 (Defender)**")
+            st.markdown("**방어자 (Defender)**")
             for d in rd.defense.rebuttals:
                 st.markdown(
                     f'<div style="background:#f0fdf4;border-left:3px solid #16a34a;'
@@ -1547,7 +1758,7 @@ def _gan_test_section(result: dict | None):
                 unsafe_allow_html=True,
             )
 
-    if st.button("🔄 테스트 초기화", key="gan_reset"):
+    if st.button("테스트 초기화", key="gan_reset"):
         st.session_state.pop("gan_report", None)
         st.session_state.pop("gan_cache_key", None)
         st.rerun()
@@ -1583,7 +1794,7 @@ if st.session_state["step"] == 1:
 
         st.markdown("")
 
-        st.markdown('<p class="ob-logo">🏮 JB Legacy</p>', unsafe_allow_html=True)
+        st.markdown('<p class="ob-logo">JB Legacy</p>', unsafe_allow_html=True)
 
         st.markdown(
 
@@ -1598,10 +1809,10 @@ if st.session_state["step"] == 1:
         st.markdown('<p class="ob-group">사장님 페르소나</p>', unsafe_allow_html=True)
 
         _OWNER_LABELS = {
-            "lee_sajang":   "👴 이사장  62세 · 전주 · 30년 한정식  (3.1억 | 승계 유리)",
-            "kim_soojang":  "👨 김소장  58세 · 부산 · 5년 분식집   (0.9억 | 세금 미미)",
-            "park_wonjang": "👨‍💼 박원장  55세 · 강남 · 8년 카페     (11.2억 | 매각 유리)",
-            "choi_daepyo":  "👔 최대표  65세 · 수원 · 22년 한식뷔페 (10.1억 | 승계 유리)",
+            "lee_sajang":   "이사장  62세 · 전주 · 30년 한정식  (3.1억 | 승계 유리)",
+            "kim_soojang":  "김소장  58세 · 부산 · 5년 분식집   (0.9억 | 세금 미미)",
+            "park_wonjang": "박원장  55세 · 강남 · 8년 카페     (11.2억 | 매각 유리)",
+            "choi_daepyo":  "최대표  65세 · 수원 · 22년 한식뷔페 (10.1억 | 승계 유리)",
         }
 
         selected_owner = st.radio(
@@ -1615,7 +1826,7 @@ if st.session_state["step"] == 1:
 
         _CHILD_LABELS = {
             "none":        "— 자녀 없음 (사장님 단독 분석)",
-            "lee_gwajang": "👩 이과장  32세 · 서울 · 직장인 자녀",
+            "lee_gwajang": "이과장  32세 · 서울 · 직장인 자녀",
         }
 
         selected_child = st.radio(
@@ -1677,7 +1888,7 @@ if st.session_state["step"] == 1:
                 _annual = st.number_input("연간 순이익 (원)", min_value=0, value=_default_profit * 12, step=1_000_000, format="%d")
                 _avg_profit = int(_annual / 12) if _annual > 0 else _default_profit
 
-            st.caption(f"📊 적용 월 순이익: **{_avg_profit:,}원** (현재는 참고용 — 추후 분석에 반영 예정)")
+            st.caption(f"적용 월 순이익: **{_avg_profit:,}원** (현재는 참고용 — 추후 분석에 반영 예정)")
 
             st.markdown('<p class="ob-group">상황 입력</p>', unsafe_allow_html=True)
 
@@ -1797,7 +2008,7 @@ else:
 
             f'<div class="s2-header">'
 
-            f'<span class="s2-title">🏮 JB Legacy</span>'
+            f'<span class="s2-title">JB Legacy</span>'
 
             f'<span class="s2-meta">{meta}</span>'
 
@@ -1880,8 +2091,6 @@ else:
 
                 '<div style="margin-top:80px;text-align:center;color:#9ca3af;">'
 
-                '<div style="font-size:32px;margin-bottom:12px">🏮</div>'
-
                 '<div style="font-size:15px;font-weight:600;color:#374151;margin-bottom:8px">무엇이 궁금하신가요?</div>'
 
                 '<div style="font-size:13px;line-height:1.8">'
@@ -1916,7 +2125,7 @@ else:
 
                     cls = "compliance-ok" if followup_cfb.startswith("✅") else "compliance-err"
 
-                    st.markdown(f'<p class="{cls}">{followup_cfb}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="{cls}">{followup_cfb.replace("✅", "").replace("⚠️", "").strip()}</p>', unsafe_allow_html=True)
 
 
 
@@ -1938,9 +2147,9 @@ else:
 
         if _is_sale:
 
-            _t_analysis, _t_health, _t_goodwill, _t_youth = st.tabs([
+            _t_analysis, _t_health, _t_goodwill, _t_youth, _t_fraud = st.tabs([
 
-                "📋 분석 결과", "📊 경영 건강", "💰 권리금 평가", "🤝 청년 매칭",
+                "분석 결과", "경영 건강", "권리금 평가", "청년 매칭", "거래 안심",
 
             ])
 
@@ -1950,7 +2159,7 @@ else:
 
             _t_analysis = st.container()
 
-            _t_health = _t_goodwill = _t_youth = None
+            _t_health = _t_goodwill = _t_youth = _t_fraud = None
 
         _analysis_container = _t_analysis.container(height=720, border=False)
 
@@ -2004,9 +2213,9 @@ else:
 
                              else:
 
-                                 _status.update(label=f"⏳ {NODE_LABELS.get(_node, _node)}...")
+                                 _status.update(label=f"{NODE_LABELS.get(_node, _node)} 진행 중...")
 
-                         _status.update(label="✅ 분석 완료", state="complete")
+                         _status.update(label="분석 완료", state="complete")
 
                      st.session_state["last_result"] = _final
 
@@ -2130,13 +2339,52 @@ else:
 
                      cls = "compliance-ok" if cfb.startswith("✅") else "compliance-err"
 
-                     st.markdown(f'<p class="{cls}">{cfb}</p>', unsafe_allow_html=True)
+                     st.markdown(f'<p class="{cls}">{cfb.replace("✅", "").replace("⚠️", "").strip()}</p>', unsafe_allow_html=True)
 
 
 
                  st.divider()
 
-                 if st.button("👩 자녀(이과장)에게 공유하기", use_container_width=True, key="share_child"):
+                 # ── PB 상담용 PDF 리포트 (실패해도 메인 플로우는 유지) ──────
+                 try:
+
+                     _pdf_cache = st.session_state.get("pdf_cache", {})
+
+                     _pdf_key = (
+                         f"{selected_user}|{st.session_state.get('last_query', '')}|"
+                         f"{len(result.get('final_response_raw') or result.get('final_response', ''))}|"
+                         f"{bool(result.get('negotiation_result'))}"
+                     )
+
+                     if _pdf_cache.get("key") != _pdf_key:
+
+                         from tools.pdf_report import build_pdf_report
+
+                         _pdf_cache = {
+                             "key":  _pdf_key,
+                             "data": build_pdf_report(
+                                 result,
+                                 st.session_state.get("life_inputs", {}),
+                                 USERS.get(selected_user, {}),
+                             ),
+                         }
+
+                         st.session_state["pdf_cache"] = _pdf_cache
+
+                     st.download_button(
+                         "PB 상담용 PDF 리포트 다운로드",
+                         data=_pdf_cache["data"],
+                         file_name="JB_Legacy_분석리포트.pdf",
+                         mime="application/pdf",
+                         use_container_width=True,
+                         key="pdf_dl",
+                     )
+
+                 except Exception as _pdf_err:
+
+                     st.caption(f"PDF 리포트를 생성할 수 없습니다: {_pdf_err}")
+
+                 if st.button("자녀(이과장)에게 공유하기", use_container_width=True, key="share_child"):
 
                      st.session_state["split_result"]      = result
 
@@ -2166,6 +2414,10 @@ else:
 
                 _youth_matching_section(selected_user)
 
+            with _t_fraud:
+
+                _fraud_guard_section(selected_user)
+
         st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -2178,6 +2430,50 @@ else:
     _BOOKING_KW = ["예약", "상담 받", "만나고", "방문", "세무사 연결", "PB 연결", "예약해", "상담해", "연결해"]
 
 
+
+    # ── 음성 입력 (STT) — 시니어 배리어프리: 말로 질문하기 ──────────────────
+    if is_slow:
+
+        _audio = st.audio_input("버튼을 누르고 질문을 말씀해 주세요 (음성 입력)", key="stt_audio")
+
+        if _audio is not None:
+
+            import hashlib
+
+            _audio_bytes = _audio.getvalue()
+
+            _audio_hash  = hashlib.md5(_audio_bytes).hexdigest()
+
+            # 같은 녹음이 rerun마다 재처리되지 않도록 해시로 1회만 변환
+            if st.session_state.get("stt_last_hash") != _audio_hash:
+
+                st.session_state["stt_last_hash"] = _audio_hash
+
+                _stt_text = ""
+
+                try:
+
+                    with st.spinner("음성을 글로 바꾸는 중..."):
+
+                        from openai import OpenAI
+
+                        _stt_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+                        _stt_text = _stt_client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("voice.wav", _audio_bytes),
+                            language="ko",
+                        ).text.strip()
+
+                except Exception as _stt_err:
+
+                    st.caption(f"음성 인식에 실패했습니다. 아래에 직접 입력해 주세요. ({_stt_err})")
+
+                if _stt_text:
+
+                    st.session_state["pending_query"] = _stt_text
+
+                    st.rerun()
 
     pending   = st.session_state.pop("pending_query", None)
 
@@ -2280,6 +2576,9 @@ else:
             # 파라미터 변경 감지 → life_inputs 업데이트 후 전체 재분석
             param_changes, change_desc = _param_result
 
+            # 변경 전 수치 캡처 (재분석 후 전후 비교용)
+            _prev_snapshot = _scenario_snapshot(cached)
+
             new_life = {**current_life, **param_changes}
 
             st.session_state["life_inputs"] = new_life
@@ -2310,9 +2609,9 @@ else:
 
                     else:
 
-                        _pstatus.update(label=f"⏳ {NODE_LABELS.get(_node, _node)}...")
+                        _pstatus.update(label=f"{NODE_LABELS.get(_node, _node)} 진행 중...")
 
-                _pstatus.update(label="✅ 재분석 완료", state="complete")
+                _pstatus.update(label="재분석 완료", state="complete")
 
             final    = result.get("final_response_raw") or result.get("final_response", "")
 
@@ -2330,7 +2629,9 @@ else:
                 or "재분석이 완료되었습니다. 오른쪽 패널을 확인하세요."
             )
 
-            chat_history[-1]["content"] = reply_prefix + summary
+            _diff_block = _build_whatif_diff(_prev_snapshot, _scenario_snapshot(result))
+
+            chat_history[-1]["content"] = reply_prefix + summary + _diff_block
 
             st.session_state.update({
                 "last_result":            result,
@@ -2384,7 +2685,7 @@ else:
 
         elif not _is_analysis_request(effective_q):
 
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, api_key=os.getenv("OPENAI_API_KEY"))
+            llm = get_llm("fast", temperature=0.3)
 
             reply = llm.invoke([
 
@@ -2424,9 +2725,9 @@ else:
 
                     else:
 
-                        _status.update(label=f"⏳ {NODE_LABELS.get(_node, _node)}...")
+                        _status.update(label=f"{NODE_LABELS.get(_node, _node)} 진행 중...")
 
-                _status.update(label="✅ 분석 완료", state="complete")
+                _status.update(label="분석 완료", state="complete")
 
 
 

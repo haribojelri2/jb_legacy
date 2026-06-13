@@ -7,8 +7,19 @@
       NO  ↓ (병렬 fan-out — selected_agents 기반 선택 실행)
   BusinessValuation ─┐
   TaxSuccession ─────┤→ synthesizer → slow_ui → compliance
-  PostExitWM ────────┘      ↓ retry?
-                      YES → synthesizer   NO → family_bridge → booking → END
+  PostExitWM ────────┤      ↓ retry?
+  Negotiation ───────┘  YES → synthesizer   NO → family_bridge → booking → END
+
+Agent 동작 구조 (이해 - 판단 - 행동 - 검증/개선):
+  이해      supervisor(질문 의도 분석), profiler(프로필·삶의 조건 로드)
+  판단      투입 에이전트 선택, 정보 충족 여부 판단,
+            시나리오 권고 A/B/C/D 택1 (synthesizer 구조화 출력 강제)
+  행동      추가 질문(profiler → END), 근거 조회(tax_succession → 세법 RAG),
+            수정안 생성(compliance 피드백 → synthesizer 재생성),
+            알림(family_bridge / fraud_guard 가족 통지),
+            요약(synthesizer·slow_ui·TTS), 예약(booking)
+  검증/개선  compliance 검수 루프 — 미통과 시 지적사항 반영 재생성,
+            retry_count >= 3 종료 조건(초과 시 PB 연결 전환)
 
 개선사항:
   1. 선택적 에이전트 투입: supervisor LLM이 결정, 불필요한 에이전트 skip
@@ -34,6 +45,7 @@ from agents.profiler import profiler_agent
 from agents.business_valuation import business_valuation_agent
 from agents.tax_succession import tax_succession_agent
 from agents.post_exit_wm import post_exit_wm_agent
+from agents.negotiation import negotiation_agent
 from agents.synthesizer import synthesizer_agent
 from agents.slow_ui_adapter import slow_ui_adapter
 from agents.compliance import compliance_agent
@@ -50,6 +62,7 @@ NODE_LABELS: dict[str, str] = {
     "business_valuation": "사업체 가치 평가",
     "tax_succession":     "세금·승계 분석",
     "post_exit_wm":       "자산운용 시뮬레이션",
+    "negotiation":        "가족 협상 조율",
     "synthesizer":        "종합 의견 생성",
     "slow_ui":            "UI 포맷 변환",
     "compliance":         "금소법 검수",
@@ -90,6 +103,7 @@ def build_graph(db_path: str = _DB_PATH):
     g.add_node("business_valuation", business_valuation_agent)
     g.add_node("tax_succession",     tax_succession_agent)
     g.add_node("post_exit_wm",       post_exit_wm_agent)
+    g.add_node("negotiation",        negotiation_agent)
     g.add_node("synthesizer",        synthesizer_agent)
     g.add_node("slow_ui",            slow_ui_adapter)
     g.add_node("compliance",         compliance_agent)
@@ -105,15 +119,17 @@ def build_graph(db_path: str = _DB_PATH):
         {"clarify": END, "continue": "dispatch"},
     )
 
-    # 병렬 fan-out: 3개 에이전트 동시 실행 (각 에이전트는 selected_agents 보고 skip 여부 결정)
+    # 병렬 fan-out: 4개 에이전트 동시 실행 (각 에이전트는 selected_agents 보고 skip 여부 결정)
     g.add_edge("dispatch", "business_valuation")
     g.add_edge("dispatch", "tax_succession")
     g.add_edge("dispatch", "post_exit_wm")
+    g.add_edge("dispatch", "negotiation")
 
     # 병렬 fan-in
     g.add_edge("business_valuation", "synthesizer")
     g.add_edge("tax_succession",     "synthesizer")
     g.add_edge("post_exit_wm",       "synthesizer")
+    g.add_edge("negotiation",        "synthesizer")
 
     g.add_edge("synthesizer", "slow_ui")
     g.add_edge("slow_ui", "compliance")
@@ -137,6 +153,7 @@ def _initial_state(
     query: str,
     clarification_answer: str = "",
     life_inputs: dict | None = None,
+    daughter_inputs: dict | None = None,
 ) -> dict:
     return {
         "messages":              [{"role": "user", "content": query}],
@@ -158,7 +175,7 @@ def _initial_state(
         "clarification_answer":  clarification_answer,
         "life_inputs":           life_inputs or {},
         "booking_result":        {},
-        "daughter_inputs":       {},
+        "daughter_inputs":       daughter_inputs or {},
         "negotiation_result":    {},
         "final_response":        "",
         "final_response_raw":    "",
@@ -173,11 +190,12 @@ def run_query(
     clarification_answer: str = "",
     life_inputs: dict | None = None,
     thread_id: str | None = None,
+    daughter_inputs: dict | None = None,
 ) -> AgentState:
     app = build_graph()
     config = {"configurable": {"thread_id": thread_id or user_id}}
     return app.invoke(
-        _initial_state(user_id, query, clarification_answer, life_inputs),
+        _initial_state(user_id, query, clarification_answer, life_inputs, daughter_inputs),
         config=config,
     )
 
@@ -188,6 +206,7 @@ def stream_query(
     clarification_answer: str = "",
     life_inputs: dict | None = None,
     thread_id: str | None = None,
+    daughter_inputs: dict | None = None,
 ):
     """각 노드 완료 시 (node_name, state_update) yield.
     마지막에 ("__done__", full_state) yield.
@@ -195,7 +214,7 @@ def stream_query(
     app = build_graph()
     config = {"configurable": {"thread_id": thread_id or user_id}}
     for chunk in app.stream(
-        _initial_state(user_id, query, clarification_answer, life_inputs),
+        _initial_state(user_id, query, clarification_answer, life_inputs, daughter_inputs),
         config=config,
         stream_mode="updates",
     ):

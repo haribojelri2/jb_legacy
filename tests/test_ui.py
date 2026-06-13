@@ -30,7 +30,7 @@ def test_step1_persona_radio_visible(page: Page):
 
 
 def test_step1_sajang_shows_form(page: Page):
-    expect(page.locator("text=따님 승계 의향")).to_be_visible()
+    expect(page.locator("text=자녀 승계 의향")).to_be_visible()
     expect(page.locator("button").filter(has_text=re.compile("시작하기"))).to_be_visible()
 
 
@@ -38,7 +38,7 @@ def test_step1_gwajang_shows_info(page: Page):
     page.locator("label").filter(has_text="이과장").click()
     page.wait_for_timeout(500)
     expect(page.locator("button").filter(has_text="이과장 화면 열기")).to_be_visible()
-    expect(page.locator("text=따님 승계 의향")).not_to_be_visible()
+    expect(page.locator("text=자녀 승계 의향")).not_to_be_visible()
 
 
 def test_step1_to_step2_navigation(page: Page):

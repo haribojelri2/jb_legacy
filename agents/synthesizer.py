@@ -1,15 +1,18 @@
 """Synthesizer — 병렬 에이전트 결과를 토론 형식으로 종합."""
 
 import os
+from typing import Literal
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from agents.llm import get_llm
 from agents.state import AgentState
+from tools.calculators import get_tax_bracket
 
 
 class SynthesisResult(BaseModel):
-    recommended_scenario: str = Field(
-        description="최종 추천 시나리오. A(완전 매각) / B(완전 승계) / C(절충) 중 정확히 하나. "
+    recommended_scenario: Literal["A", "B", "C", "D", ""] = Field(
+        description="최종 추천 시나리오. A(완전 매각) / B(완전 승계) / C(절충), "
+                    "D(가족 합의안)는 협상 결과가 제시된 경우에만. "
                     "포트폴리오 데이터가 없거나 추천 불가 시 빈 문자열."
     )
     final_response: str = Field(description="사용자에게 보여줄 전체 분석 응답 텍스트")
@@ -56,6 +59,8 @@ def synthesizer_agent(state: AgentState) -> dict:
         opinions.append(f"[세무·승계 에이전트]\n{state['tax_comparison']['summary']}")
     if state.get("retirement_portfolio", {}).get("advice"):
         opinions.append(f"[자산운용 에이전트]\n{state['retirement_portfolio']['advice']}")
+    if state.get("negotiation_result", {}).get("deal_summary"):
+        opinions.append(f"[가족 협상 조율 에이전트]\n{state['negotiation_result']['deal_summary']}")
 
     if not opinions:
         return {
@@ -67,7 +72,7 @@ def synthesizer_agent(state: AgentState) -> dict:
     _core = {"BusinessValuation", "TaxSuccession", "PostExitWM"}
     _active_core = [a for a in selected if a in _core]
     if len(_active_core) == 1:
-        llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+        llm = get_llm("smart")
         answer = llm.invoke([
             SystemMessage(content=(
                 "당신은 JB Legacy 금융 상담사입니다.\n"
@@ -167,6 +172,35 @@ def synthesizer_agent(state: AgentState) -> dict:
             f"{cont_c}"
         )
 
+    # D안(가족 합의안) — 협상 결과가 있을 때만 주입 (없으면 기존 프롬프트와 동일)
+    neg = state.get("negotiation_result", {})
+    d_scen = neg.get("scenario_negotiated") if neg else None
+    d_system_suffix = ""
+    if d_scen:
+        d_cond = neg.get("daughter_conditions", {})
+        d_cont = d_scen.get("business_continuity", {})
+        m_d = d_scen.get("monthly_income", {}).get("합계", 0)
+        scenario_block += (
+            f"\n\n[가족 합의안 D — 자녀가 제안한 협상 조건]\n"
+            f"승계 비율 {d_cond.get('succession_rate', 0)*100:.0f}% / "
+            f"자문료 순이익의 {d_cond.get('consulting_rate', 0)*100:.0f}% "
+            f"(월 {d_cond.get('consulting_monthly', 0):,}원, 10년간)\n"
+            f"D(가족 합의안): 운용자산 {d_scen.get('total_capital', 0):,}원"
+            f" → 사장님 월 수령 {m_d:,}원\n"
+            + (
+                f"자녀 10년 누적 수익: {d_cont.get('daughter_cumulative_income', 0):,}원 / "
+                f"가족 총자산 증가: {d_cont.get('family_asset_gain', 0):,}원\n"
+                if d_cont else ""
+            )
+        )
+        d_system_suffix = (
+            "\n\n[추가 지시 — 가족 합의안 D 존재]\n"
+            "이번 분석에는 자녀가 제안한 가족 합의안 D가 포함되어 있습니다.\n"
+            "[삶 적합성 분석]에 '4. 가족 합의축 (D안)'을 추가해 월 수령액과 자녀 수익을 "
+            "다른 안과 수치로 비교하세요.\n"
+            "[최종 권고]에서는 A/B/C/D 중 정확히 하나만 고르세요."
+        )
+
     tax = state.get("tax_comparison", {})
     bv  = state.get("business_valuation", {})
     tax_block = ""
@@ -238,10 +272,10 @@ def synthesizer_agent(state: AgentState) -> dict:
         if compliance_note and not compliance_note.startswith("✅") else ""
     )
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("smart")
     structured_llm = llm.with_structured_output(SynthesisResult)
     output: SynthesisResult = structured_llm.invoke([
-        SystemMessage(content=_SYSTEM),
+        SystemMessage(content=_SYSTEM + d_system_suffix),
         HumanMessage(content=(
             f"[전문 에이전트 분석 결과]\n\n{opinions_text}"
             f"{scenario_block}"
@@ -316,21 +350,8 @@ def _build_calc_section(tax: dict, bv: dict, s_sale: dict | None,
         national_tax = s.get("national_tax", 0)
         local_tax_amount = s.get("local_tax", 0)
         total_taxable_income = goodwill_taxable + other_income
-        # 누진세율 구간 역산 — Judge가 수식 직접 검증 가능하도록 공식 명시
-        _brackets = [
-            (300_000_000, 0.45, 65_940_000),
-            (150_000_000, 0.38, 19_400_000),
-            (88_000_000,  0.35, 15_440_000),
-            (60_000_000,  0.24,  5_220_000),
-            (40_000_000,  0.15,  1_260_000),
-            (14_000_000,  0.08,    576_000),
-            (0,           0.06,          0),
-        ]
-        _rate, _ded = 0.06, 0
-        for _thr, _r, _d in _brackets:
-            if total_taxable_income > _thr:
-                _rate, _ded = _r, _d
-                break
+        # 누진세율 구간 역산 — 실제 계산(calculators)과 동일한 표를 단일 출처로 사용
+        _rate, _ded = get_tax_bracket(total_taxable_income)
         lines.append(
             f"매각 세금(소득세법 제21조·시행령 제87조):\n"
             f"  권리금 {goodwill:,}원 × 40%(필요경비 60% 공제) = 기타소득 과세표준 {goodwill_taxable:,}원\n"

@@ -1,7 +1,7 @@
 """Tax & Succession Agent — RAG 기반 세금 시뮬레이션."""
 
 import os
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from tools.calculators import calc_goodwill_tax, calc_gift_tax_special, calc_gift_tax_general, estimate_business_value
@@ -42,7 +42,7 @@ def tax_succession_agent(state: AgentState) -> dict:
     # RAG: 관련 세법 문서 검색
     rag_context = retrieve(state["query"] + " 가업승계 세금 권리금")
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("smart")
     comparison = llm.invoke([
         SystemMessage(content=(
             "세무 전문가입니다. 아래 세법 자료와 계산 결과를 바탕으로 "

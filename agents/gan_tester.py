@@ -2,7 +2,7 @@
 
 import os
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import SystemMessage, HumanMessage
 
 
@@ -158,16 +158,8 @@ class GANTester:
 
     def __init__(self, rounds: int = 1):
         self.rounds = max(1, min(rounds, 2))
-        self._llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY"),
-        )
-        self._judge_llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY"),
-        )
+        self._llm = get_llm("smart")
+        self._judge_llm = get_llm("smart")
 
     def _critic(self, query: str, response: str, prior: str) -> CritiqueResult:
         return self._llm.with_structured_output(CritiqueResult).invoke([

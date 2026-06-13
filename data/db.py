@@ -35,6 +35,40 @@ def fetch_revenue_history(user_id: str) -> list[int]:
 
 
 
+# ── 개인 거래내역 (이상거래 탐지·소비흐름 분석) ─────────────────────────────
+
+def _ensure_transactions(conn: sqlite3.Connection):
+    """기존 DB에도 transactions 테이블이 생기도록 마이그레이션 (idempotent)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     TEXT NOT NULL,
+            day_offset  INTEGER NOT NULL,
+            tx_time     TEXT NOT NULL,
+            merchant    TEXT NOT NULL,
+            category    TEXT NOT NULL,
+            channel     TEXT NOT NULL,
+            amount      INTEGER NOT NULL,
+            is_anomaly  INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    from data.init_db import seed_transactions
+    seed_transactions(conn.cursor())
+    conn.commit()
+
+
+def fetch_transactions(user_id: str) -> list[dict]:
+    """최근 90일 개인 거래내역 (day_offset 0=오늘, 오름차순)."""
+    with get_conn() as conn:
+        _ensure_transactions(conn)
+        rows = conn.execute(
+            "SELECT * FROM transactions WHERE user_id=? "
+            "ORDER BY day_offset ASC, tx_time ASC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── 청년 후보 매칭 ──────────────────────────────────────────────────────────
 
 def fetch_youth_candidates(user_id: str, top_n: int = 3) -> list[dict]:

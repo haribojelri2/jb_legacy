@@ -14,6 +14,71 @@ def get_conn():
     return sqlite3.connect(DB_PATH)
 
 
+# ── 이사장 개인 거래내역 시드 (최근 90일, day_offset 0=오늘) ────────────────
+# 정상 거래: 주간 시간대, 소액 반복 (월 생활비 약 190만원 수준)
+# 이상 거래(is_anomaly=1): 보이스피싱 전형 패턴 — 심야 최초 수취인 고액 이체,
+# 상품권 분할 결제, 심야 해외 결제
+def _build_lee_sajang_transactions() -> list[tuple]:
+    rows = []
+
+    def add(day, time, merchant, category, channel, amount, anomaly=0):
+        rows.append(("lee_sajang", day, time, merchant, category, channel, amount, anomaly))
+
+    # 월 반복 고정 지출 (자동이체) — 3개월
+    for month_start in (2, 32, 62):
+        add(month_start,     "09:00", "한국전력/도시가스",   "공과금",  "자동이체", 183_000)
+        add(month_start + 1, "09:00", "KT 통신요금",         "통신",    "자동이체",  89_000)
+        add(month_start + 3, "09:00", "삼성화재 실손보험",   "보험",    "자동이체", 215_000)
+
+    # 마트·식료품 (주 2~3회, 주간)
+    mart_days = [1, 5, 8, 13, 16, 21, 25, 29, 34, 38, 43, 47, 52, 56, 61, 66, 70, 75, 80, 85]
+    mart_amounts = [82_000, 64_000, 97_000, 71_000, 88_000, 59_000, 102_000, 76_000,
+                    83_000, 69_000, 91_000, 78_000, 86_000, 73_000, 95_000, 67_000,
+                    84_000, 72_000, 89_000, 61_000]
+    for d, amt in zip(mart_days, mart_amounts):
+        add(d, "11:20", "하나로마트 전주점", "식료품", "카드", amt)
+
+    # 병원·약국 (월 2~3회)
+    for d, m, amt in [(6, "전주성모내과", 74_000), (7, "온누리약국", 28_000),
+                      (20, "전주성모내과", 68_000), (36, "전주성모내과", 81_000),
+                      (37, "온누리약국", 31_000), (55, "한빛정형외과", 125_000),
+                      (56, "온누리약국", 24_000), (78, "전주성모내과", 71_000)]:
+        add(d, "10:40", m, "병원·약국", "카드", amt)
+
+    # 외식·경조사·교통 등
+    for d, t, m, c, amt in [(10, "18:30", "전주막걸리골목", "외식", 48_000),
+                            (24, "12:10", "가족 외식 (백반집)", "외식", 56_000),
+                            (40, "18:50", "전주막걸리골목", "외식", 43_000),
+                            (68, "12:30", "가족 외식 (백반집)", "외식", 61_000),
+                            (15, "14:00", "친지 경조사비", "경조사", 100_000),
+                            (49, "14:00", "지인 경조사비", "경조사", 100_000),
+                            (11, "09:30", "전주주유소", "교통", 70_000),
+                            (44, "09:40", "전주주유소", "교통", 72_000),
+                            (77, "09:20", "전주주유소", "교통", 68_000)]:
+        add(d, t, m, c, "카드", amt)
+
+    # ── 이상 거래 (보이스피싱 패턴, ground-truth 라벨) ──
+    add(3,  "02:17", "미상 개인계좌 이체 (최초 수취인)", "이체",   "이체", 8_000_000, 1)
+    add(3,  "02:31", "ABC상품권몰",                      "상품권", "카드", 1_990_000, 1)
+    add(3,  "02:38", "ABC상품권몰",                      "상품권", "카드", 1_990_000, 1)
+    add(12, "04:05", "해외 온라인 결제 (QX-MALL)",       "해외",   "카드", 1_450_000, 1)
+
+    return rows
+
+
+def seed_transactions(cur):
+    """transactions 테이블이 비어 있을 때만 시드 (idempotent)."""
+    count = cur.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    if count:
+        return
+    cur.executemany(
+        "INSERT INTO transactions "
+        "(user_id, day_offset, tx_time, merchant, category, channel, amount, is_anomaly) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        _build_lee_sajang_transactions(),
+    )
+
+
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
@@ -54,6 +119,18 @@ def init_db():
     CREATE TABLE IF NOT EXISTS user_region_mapping (
         user_id TEXT PRIMARY KEY,
         region  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     TEXT NOT NULL,
+        day_offset  INTEGER NOT NULL,
+        tx_time     TEXT NOT NULL,
+        merchant    TEXT NOT NULL,
+        category    TEXT NOT NULL,
+        channel     TEXT NOT NULL,
+        amount      INTEGER NOT NULL,
+        is_anomaly  INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS jb_products (
@@ -105,6 +182,9 @@ def init_db():
         "INSERT OR REPLACE INTO revenue_history VALUES (?,?,?)",
         [(uid, i, rev) for uid, revs in revenue_data.items() for i, rev in enumerate(revs)],
     )
+
+    # ── 개인 거래내역 (이상거래 탐지·소비흐름 분석용) ───────────────────────
+    seed_transactions(cur)
 
     # ── 청년 후보 ──────────────────────────────────────────────────────────
     candidates = [

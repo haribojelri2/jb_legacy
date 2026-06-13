@@ -1,7 +1,8 @@
 """Negotiation Agent — 이과장의 협상 조건으로 D안(합의안) 포트폴리오 생성."""
 
-import os
-from langchain_openai import ChatOpenAI
+import json
+import re
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from agents.post_exit_wm import build_portfolio, home_pension_monthly
@@ -13,11 +14,49 @@ _SYSTEM = """\
 마크다운 기호(*, **, #, `)를 절대 사용하지 마세요. 번호와 줄바꿈만 쓰세요.
 자녀의 한마디를 반드시 언급하며, 어떤 부분에서 서로 이익이 되는지 짚어주세요."""
 
+_DEFAULT_CONDITIONS = {"succession_rate": 0.7, "consulting_rate": 0.2, "message": ""}
+
+
+def _extract_conditions(query: str) -> dict:
+    """채팅 질문에서 승계율·자문료율 추출 (실패 시 기본 70%/20%)."""
+    try:
+        resp = get_llm("fast").invoke([
+            SystemMessage(content=(
+                "사용자 메시지에서 가업 승계 협상 조건을 추출하세요.\n"
+                "- succession_rate: 자녀가 이어받을 비율 (0~1 소수. 예: \"70% 승계\" → 0.7)\n"
+                "- consulting_rate: 순이익 대비 자문료율 (0~1 소수. 예: \"자문료 20%\" → 0.2)\n"
+                "명시되지 않은 값은 succession_rate 0.7, consulting_rate 0.2를 쓰세요.\n"
+                "반드시 JSON만 반환: {\"succession_rate\": 0.7, \"consulting_rate\": 0.2}"
+            )),
+            HumanMessage(content=query),
+        ]).content.strip()
+        m = re.search(r"\{.*\}", resp, re.S)
+        parsed = json.loads(m.group(0)) if m else {}
+        return {
+            "succession_rate": float(parsed.get("succession_rate", 0.7)),
+            "consulting_rate": float(parsed.get("consulting_rate", 0.2)),
+            "message": "",
+        }
+    except Exception:
+        return dict(_DEFAULT_CONDITIONS)
+
+
+def _wants_negotiation(query: str) -> bool:
+    """결정론 게이트 — supervisor LLM의 과잉 선택으로 D안이 생기지 않도록."""
+    return (
+        any(kw in query for kw in ("협상", "합의안", "D안"))
+        or ("자문료" in query and ("승계" in query or "제안" in query))
+    )
+
 
 def negotiation_agent(state: AgentState) -> dict:
     daughter = state.get("daughter_inputs", {})
-    if not daughter:
+    # 게이트: 협상 입력이 없고 질문에 협상 의도도 없으면 skip
+    if not daughter and not _wants_negotiation(state.get("query", "")):
         return {}
+    # 채팅 경유(그래프 라우팅): 질문에서 협상 조건 추출
+    if not daughter:
+        daughter = _extract_conditions(state.get("query", ""))
 
     profile  = state.get("user_profile", {})
     biz      = profile.get("business", {})
@@ -85,7 +124,7 @@ def negotiation_agent(state: AgentState) -> dict:
     }
 
     # LLM 합의안 설명
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.1, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("smart", temperature=0.1)
     deal_summary = llm.invoke([
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=(
@@ -111,5 +150,6 @@ def negotiation_agent(state: AgentState) -> dict:
                 "consulting_monthly": consulting_monthly,
                 "message":            daughter_message,
             },
-        }
+        },
+        "active_agents": ["Negotiation"],
     }

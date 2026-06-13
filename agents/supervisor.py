@@ -1,7 +1,7 @@
 """Supervisor — LLM 기반 동적 에이전트 라우팅."""
 
 import os, json
-from langchain_openai import ChatOpenAI
+from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 
@@ -14,6 +14,7 @@ _SYSTEM = """\
 - TaxSuccession     : 세금·증여·상속·가업승계·절세 전략 분석
 - PostExitWM        : 매각 후 노후 자산운용·포트폴리오·월수령액 설계
 - FamilyBridge      : 가족(자녀)에게 승계 리포트 공유
+- Negotiation       : 자녀가 제안한 승계 비율·자문료 조건으로 가족 합의안(D안) 생성
 
 선택 기준:
 - 종합 상담("매각 vs 승계", "엑시트 계획", "어떻게 해야 할까") → 3개 핵심 에이전트 모두
@@ -21,6 +22,7 @@ _SYSTEM = """\
 - 자산운용·포트폴리오·노후·월수령 단독 질문 → PostExitWM만
 - 권리금·시세·가치평가 단독 질문 → BusinessValuation만
 - 가족 공유 요청 → FamilyBridge 추가
+- 자녀의 협상 조건("딸이 70% 승계를 제안", "자문료 20%면 어때") → Negotiation 추가
 
 규칙:
 1. 복합 주제면 복수 선택, 단일 주제면 해당 에이전트 하나만 선택
@@ -37,7 +39,7 @@ _ROUTE_MAP = {
 
 
 def supervisor_agent(state: AgentState) -> dict:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY"))
+    llm = get_llm("fast")
     resp = llm.invoke([
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=state["query"]),
@@ -57,6 +59,15 @@ def supervisor_agent(state: AgentState) -> dict:
     if any(kw in q for kw in ["딸", "아들", "자녀", "알려", "공유", "보내", "전달"]):
         if "FamilyBridge" not in agents:
             agents.append("FamilyBridge")
+
+    # 협상 조건·합의안 키워드 감지 → Negotiation 자동 추가 (결정론 게이트 우선)
+    if (
+        state.get("daughter_inputs")
+        or any(kw in q for kw in ["협상", "합의안", "D안"])
+        or ("자문료" in q and ("승계" in q or "제안" in q))
+    ):
+        if "Negotiation" not in agents:
+            agents.append("Negotiation")
 
     route = _ROUTE_MAP.get(agents[0], "general")
 
