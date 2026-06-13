@@ -180,7 +180,18 @@ _TARGET_OPTS = {
 
 
 
+_ANALYSIS_KEYWORDS = (
+    "은퇴", "가게", "사업", "매각", "팔", "넘기", "승계", "물려", "상속", "증여",
+    "세금", "절세", "권리금", "노후", "연금", "포트폴리오", "자산", "현금흐름",
+    "월수령", "생활비", "어떻게", "얼마", "정리",
+)
+
+
 def _is_analysis_request(query: str) -> bool:
+    # 키워드 fast-path: 핵심 재무 키워드가 있으면 LLM 분류 없이 분석으로 처리
+    # (자연스러운 문장 "은퇴하고 싶어요", "어떻게 해야 할까요"가 대화로 오분류되는 것 방지)
+    if any(kw in query for kw in _ANALYSIS_KEYWORDS):
+        return True
 
     llm = get_llm("fast")
 
@@ -1060,6 +1071,70 @@ def _booking_section(booking: dict):
     )
 
 
+
+
+
+def _render_analysis_result(result, selected_user):
+    """분석 결과를 서브탭으로 분리 렌더링 (세금 / 노후 설계 / 가족 협상 / 상담·리포트)."""
+    recommended = result.get("recommended_scenario", "")
+    neg = result.get("negotiation_result", {})
+    t_tax, t_wm, t_nego, t_more = st.tabs(["세금 비교", "노후 설계", "가족 협상(D안)", "상담·리포트"])
+
+    with t_tax:
+        _tax_cards(result.get("tax_comparison", {}))
+
+    with t_wm:
+        _portfolio_section(result.get("retirement_portfolio", {}), recommended)
+
+    with t_nego:
+        if neg:
+            _negotiation_section(neg)
+        else:
+            st.caption("자녀(이과장)가 협상 조건을 제안하면 합의안(D안)이 여기에 표시됩니다.")
+        if st.button("자녀(이과장)에게 공유 / 협상 시작", use_container_width=True, key="share_child"):
+            st.session_state["split_result"] = result
+            st.session_state["child_view_active"] = True
+            st.rerun()
+
+    with t_more:
+        final_for_tts = result.get("final_response_raw") or result.get("final_response", "")
+        if final_for_tts:
+            _voice_briefing_section(final_for_tts)
+        _booking_section(result.get("booking_result", {}))
+        _contract_manager_section(result)
+        try:
+            pdf_cache = st.session_state.get("pdf_cache", {})
+            pdf_key = (
+                f"{selected_user}|{st.session_state.get('last_query', '')}|"
+                f"{len(result.get('final_response_raw') or result.get('final_response', ''))}|"
+                f"{bool(result.get('negotiation_result'))}"
+            )
+            if pdf_cache.get("key") != pdf_key:
+                from tools.pdf_report import build_pdf_report
+                pdf_cache = {"key": pdf_key, "data": build_pdf_report(
+                    result, st.session_state.get("life_inputs", {}), USERS.get(selected_user, {}))}
+                st.session_state["pdf_cache"] = pdf_cache
+            st.download_button("PB 상담용 PDF 리포트 다운로드", data=pdf_cache["data"],
+                               file_name="JB_Legacy_분석리포트.pdf", mime="application/pdf",
+                               use_container_width=True, key="pdf_dl")
+        except Exception as pdf_err:
+            st.caption(f"PDF 리포트를 생성할 수 없습니다: {pdf_err}")
+        with st.expander("상세 분석 데이터"):
+            bv = result.get("business_valuation", {})
+            if bv.get("components"):
+                st.markdown("사업체 가치 구성")
+                for k, v in bv["components"].items():
+                    st.write(f"{k}: {v:,}원")
+            rag = result.get("tax_rag_context", "")
+            if rag:
+                st.markdown("참조 세법·상품 문서 (RAG)")
+                st.text(rag[:1000] + "...")
+
+    cfb = result.get("compliance_feedback", "")
+    if cfb:
+        cls = "compliance-ok" if cfb.startswith("✅") else "compliance-err"
+        st.markdown(f'<p class="{cls}">{cfb.replace("✅", "").replace("⚠️", "").strip()}</p>',
+                    unsafe_allow_html=True)
 
 
 
@@ -2293,104 +2368,7 @@ else:
 
 
 
-                 _tax_cards(result.get("tax_comparison", {}))
-
-                 recommended = result.get("recommended_scenario", "")
-
-                 _portfolio_section(result.get("retirement_portfolio", {}), recommended)
-
-                 final_for_tts = result.get("final_response_raw") or result.get("final_response", "")
-                 if final_for_tts:
-                     _voice_briefing_section(final_for_tts)
-
-                 _booking_section(result.get("booking_result", {}))
-
-                 _negotiation_section(result.get("negotiation_result", {}))
-
-                 _contract_manager_section(result)
-
-
-
-                 with st.expander("상세 분석 데이터"):
-
-                     bv = result.get("business_valuation", {})
-
-                     if bv.get("components"):
-
-                         st.markdown("사업체 가치 구성")
-
-                         for k, v in bv["components"].items():
-
-                             st.write(f"{k}: {v:,}원")
-
-                     rag = result.get("tax_rag_context", "")
-
-                     if rag:
-
-                         st.markdown("참조 세법·상품 문서 (RAG)")
-
-                         st.text(rag[:1000] + "...")
-
-
-
-                 cfb = result.get("compliance_feedback", "")
-
-                 if cfb:
-
-                     cls = "compliance-ok" if cfb.startswith("✅") else "compliance-err"
-
-                     st.markdown(f'<p class="{cls}">{cfb.replace("✅", "").replace("⚠️", "").strip()}</p>', unsafe_allow_html=True)
-
-
-
-                 st.divider()
-
-                 # ── PB 상담용 PDF 리포트 (실패해도 메인 플로우는 유지) ──────
-                 try:
-
-                     _pdf_cache = st.session_state.get("pdf_cache", {})
-
-                     _pdf_key = (
-                         f"{selected_user}|{st.session_state.get('last_query', '')}|"
-                         f"{len(result.get('final_response_raw') or result.get('final_response', ''))}|"
-                         f"{bool(result.get('negotiation_result'))}"
-                     )
-
-                     if _pdf_cache.get("key") != _pdf_key:
-
-                         from tools.pdf_report import build_pdf_report
-
-                         _pdf_cache = {
-                             "key":  _pdf_key,
-                             "data": build_pdf_report(
-                                 result,
-                                 st.session_state.get("life_inputs", {}),
-                                 USERS.get(selected_user, {}),
-                             ),
-                         }
-
-                         st.session_state["pdf_cache"] = _pdf_cache
-
-                     st.download_button(
-                         "PB 상담용 PDF 리포트 다운로드",
-                         data=_pdf_cache["data"],
-                         file_name="JB_Legacy_분석리포트.pdf",
-                         mime="application/pdf",
-                         use_container_width=True,
-                         key="pdf_dl",
-                     )
-
-                 except Exception as _pdf_err:
-
-                     st.caption(f"PDF 리포트를 생성할 수 없습니다: {_pdf_err}")
-
-                 if st.button("자녀(이과장)에게 공유하기", use_container_width=True, key="share_child"):
-
-                     st.session_state["split_result"]      = result
-
-                     st.session_state["child_view_active"] = True
-
-                     st.rerun()
+                 _render_analysis_result(result, selected_user)
 
          else:
 
@@ -2475,11 +2453,27 @@ else:
 
                     st.rerun()
 
-    pending   = st.session_state.pop("pending_query", None)
-
     typed_q   = st.chat_input("궁금한 것을 물어보세요..." if not is_slow else "말씀해 주세요...")
 
-    effective_q = typed_q or pending
+    pending   = st.session_state.pop("pending_query", None)
+
+    new_q     = typed_q or pending
+
+    # 1단계: 새 입력이면 사용자 말풍선을 먼저 띄우고 즉시 rerun (분석 기다리는 동안 내 메시지 표시)
+    if new_q:
+
+        _ch = st.session_state.get("chat_history", [])
+
+        _ch.append({"role": "user", "content": new_q})
+
+        st.session_state["chat_history"] = _ch
+
+        st.session_state["__run_query"] = new_q
+
+        st.rerun()
+
+    # 2단계: 직전에 표시한 사용자 메시지에 대해 실제 분석/응답 생성
+    effective_q = st.session_state.pop("__run_query", None)
 
 
 
@@ -2506,8 +2500,7 @@ else:
         is_booking_q = any(kw in effective_q for kw in _BOOKING_KW)
 
         chat_history = st.session_state.get("chat_history", [])
-
-        chat_history.append({"role": "user", "content": effective_q})
+        # 사용자 메시지는 1단계에서 이미 추가됨
 
 
 
