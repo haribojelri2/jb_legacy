@@ -2151,11 +2151,11 @@ else:
 
     ))
 
+    # 사장님(이과장 제외)이 분석 결과를 가지면 부가 탭(경영건강·권리금·청년매칭·거래안심)을
+    # 추천 시나리오(A/B/C)와 무관하게 항상 노출한다. (C 절충안도 매각 일부 포함 → 청년 매칭 유효)
     _is_sale = (
         selected_user != "lee_gwajang"
-        and (
-            (_has_result and (_result_preview or {}).get("recommended_scenario", "") == "A")
-        )
+        and _has_result
     )
 
     if _has_result or st.session_state.get("child_view_active"):
