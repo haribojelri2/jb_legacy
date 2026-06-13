@@ -1613,11 +1613,17 @@ def _contract_manager_section(result: dict):
     rate    = cond.get("consulting_rate", 0)
 
     if not monthly:
-        # B/C안에서 자문료 추출 시도
+        # 추천 시나리오에 자문료가 있을 때만 표시.
+        # A안(완전 매각)은 자문료가 없으므로 이 섹션을 띄우지 않는다.
+        recommended = result.get("recommended_scenario", "")
         port = result.get("retirement_portfolio", {})
-        s_succ = port.get("scenario_succession") or port.get("scenario_hybrid")
-        if s_succ:
-            monthly = s_succ.get("monthly_income", {}).get("자문료·급여", 0)
+        scen = None
+        if recommended == "B":
+            scen = port.get("scenario_succession")
+        elif recommended == "C":
+            scen = port.get("scenario_hybrid")
+        if scen:
+            monthly = scen.get("monthly_income", {}).get("자문료·급여", 0)
 
     if not monthly:
         return
