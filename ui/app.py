@@ -2151,12 +2151,15 @@ else:
 
     ))
 
-    # 사장님(이과장 제외)이 분석 결과를 가지면 부가 탭(경영건강·권리금·청년매칭·거래안심)을
-    # 추천 시나리오(A/B/C)와 무관하게 항상 노출한다. (C 절충안도 매각 일부 포함 → 청년 매칭 유효)
+    # 사장님(이과장 제외)이 분석 결과를 가지면 부가 탭을 노출한다.
+    # 경영건강·권리금·거래안심은 추천 무관하게 항상, 청년 매칭은 매각이 포함될 때만.
     _is_sale = (
         selected_user != "lee_gwajang"
         and _has_result
     )
+    _recommended = (_result_preview or {}).get("recommended_scenario", "")
+    # 청년 매칭(외부 인수)은 A(완전매각)·C(절충, 50% 매각)에서만. B(완전승계)·D(가족합의)는 제외.
+    _show_youth = _is_sale and _recommended not in ("B", "D")
 
     if _has_result or st.session_state.get("child_view_active"):
 
@@ -2240,11 +2243,19 @@ else:
 
         if _is_sale:
 
-            _t_analysis, _t_health, _t_goodwill, _t_youth, _t_fraud = st.tabs([
+            _labels = ["분석 결과", "경영 건강", "권리금 평가"]
+            if _show_youth:
+                _labels.append("청년 매칭")
+            _labels.append("거래 안심")
+            _tabs = st.tabs(_labels)
 
-                "분석 결과", "경영 건강", "권리금 평가", "청년 매칭", "거래 안심",
-
-            ])
+            _t_analysis, _t_health, _t_goodwill = _tabs[0], _tabs[1], _tabs[2]
+            _idx = 3
+            if _show_youth:
+                _t_youth = _tabs[_idx]; _idx += 1
+            else:
+                _t_youth = None
+            _t_fraud = _tabs[_idx]
 
         else:
 
@@ -2406,9 +2417,11 @@ else:
 
                 _dynamic_valuation_section(selected_user, monthly_profit=_mp)
 
-            with _t_youth:
+            if _t_youth is not None:
 
-                _youth_matching_section(selected_user)
+                with _t_youth:
+
+                    _youth_matching_section(selected_user)
 
             with _t_fraud:
 
