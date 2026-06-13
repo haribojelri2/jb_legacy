@@ -691,7 +691,7 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
                     import pandas as pd
 
-                    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
 
                     for note in proj.get("notes", []):
 
@@ -946,7 +946,7 @@ def _negotiation_section(negotiation_result: dict):
                         "잔여원금": f"{d['remaining_capital']:,}원",
                     })
 
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
 
 
 
@@ -1091,7 +1091,7 @@ def _render_analysis_result(result, selected_user):
             _negotiation_section(neg)
         else:
             st.caption("자녀(이과장)가 협상 조건을 제안하면 합의안(D안)이 여기에 표시됩니다.")
-        if st.button("자녀(이과장)에게 공유 / 협상 시작", use_container_width=True, key="share_child"):
+        if st.button("자녀(이과장)에게 공유 / 협상 시작", width='stretch', key="share_child"):
             st.session_state["split_result"] = result
             st.session_state["child_view_active"] = True
             st.rerun()
@@ -1116,7 +1116,7 @@ def _render_analysis_result(result, selected_user):
                 st.session_state["pdf_cache"] = pdf_cache
             st.download_button("PB 상담용 PDF 리포트 다운로드", data=pdf_cache["data"],
                                file_name="JB_Legacy_분석리포트.pdf", mime="application/pdf",
-                               use_container_width=True, key="pdf_dl")
+                               width='stretch', key="pdf_dl")
         except Exception as pdf_err:
             st.caption(f"PDF 리포트를 생성할 수 없습니다: {pdf_err}")
         with st.expander("상세 분석 데이터"):
@@ -1232,7 +1232,7 @@ def _child_dashboard(result: dict | None):
                     placeholder="예: 제가 최선을 다해 가게를 지키겠습니다.",
                 )
 
-                submitted = st.form_submit_button("협상안 제안하기 →", type="primary", use_container_width=True)
+                submitted = st.form_submit_button("협상안 제안하기 →", type="primary", width='stretch')
 
                 if submitted:
 
@@ -1282,7 +1282,7 @@ def _voice_briefing_section(final_response: str):
     """OpenAI TTS 기반 AI PB 음성 브리핑 — 시니어 배리어 프리 UI."""
     import io
     st.markdown('<p class="section-label">AI PB 음성 브리핑 <span style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:4px;margin-left:6px">시니어 UI</span></p>', unsafe_allow_html=True)
-    if st.button("AI PB의 음성 브리핑 듣기", use_container_width=True, key="tts_btn"):
+    if st.button("AI PB의 음성 브리핑 듣기", width='stretch', key="tts_btn"):
         with st.spinner("음성 생성 중... (약 5~10초)"):
             from openai import OpenAI
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -1591,7 +1591,7 @@ def _fraud_guard_section(user_id: str):
         with st.expander("전송된 알림 내용"):
             st.text(build_family_alert(USERS.get(user_id, {}), alerts))
     elif st.button("자녀(이과장)에게 이상거래 알림 보내기",
-                   use_container_width=True, key="fraud_alert_btn", type="primary"):
+                   width='stretch', key="fraud_alert_btn", type="primary"):
         st.session_state[sent_key] = True
         st.rerun()
 
@@ -1670,7 +1670,7 @@ def _contract_manager_section(result: dict):
             }
             for s in plan["schedule"]
         ]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
 
     st.markdown(
         f'<div style="background:#eff6ff;border:1px solid #93c5fd;'
@@ -1715,7 +1715,7 @@ def _gan_test_section(result: dict | None):
         rounds = st.selectbox("토론 라운드", [1, 2], index=0, key="gan_rounds")
     with col_btn:
         st.markdown("")
-        run_btn = st.button("GAN 테스트 시작", type="primary", use_container_width=True, key="gan_run")
+        run_btn = st.button("GAN 테스트 시작", type="primary", width='stretch', key="gan_run")
 
     # 이전 결과 캐시 — 같은 응답+라운드면 재실행 안 함
     cache_key = f"{hash(final_response)}_{rounds}"
@@ -1929,7 +1929,7 @@ if st.session_state["step"] == 1:
 
             st.markdown("")
 
-            if st.button("이과장 화면 열기 →", type="primary", use_container_width=True):
+            if st.button("이과장 화면 열기 →", type="primary", width='stretch'):
 
                 st.session_state.update({
 
@@ -2001,7 +2001,7 @@ if st.session_state["step"] == 1:
 
             st.markdown("")
 
-            if st.button("분석 시작하기 →", type="primary", use_container_width=True):
+            if st.button("분석 시작하기 →", type="primary", width='stretch'):
 
                 st.session_state.update({
 
