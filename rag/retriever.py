@@ -9,12 +9,15 @@ from data.tax_docs import TAX_DOCUMENTS
 _DB_PATH = os.path.join(os.path.dirname(__file__), "chroma_db")
 _SIG_PATH = os.path.join(_DB_PATH, ".content_sig")
 _COLLECTION = "tax_law_2025"
+# 빌드 로직이 바뀌면 올린다 → 기존 캐시(중복·옛 내용)를 강제 재생성
+_BUILD_VERSION = "v2-clean-rebuild"
 _vectorstore = None
 
 
 def _content_sig() -> str:
-    """문서 내용 해시 — 내용이 바뀌면(개수가 같아도) 재구축 트리거."""
+    """문서 내용 + 빌드 버전 해시 — 내용/로직이 바뀌면 재구축 트리거."""
     h = hashlib.md5()
+    h.update(_BUILD_VERSION.encode("utf-8"))
     for d in TAX_DOCUMENTS:
         h.update(d["id"].encode("utf-8"))
         h.update(d["content"].encode("utf-8"))
@@ -29,6 +32,8 @@ def _embeddings():
 
 
 def _build_vectorstore() -> Chroma:
+    # 항상 빈 상태에서 시작 (중복 임베딩 누적 방지)
+    shutil.rmtree(_DB_PATH, ignore_errors=True)
     docs = [
         Document(page_content=d["content"], metadata={"title": d["title"], "id": d["id"]})
         for d in TAX_DOCUMENTS
@@ -78,7 +83,16 @@ def get_vectorstore() -> Chroma:
 
 
 def retrieve(query: str, k: int = 3) -> str:
-    """쿼리와 유사한 세법·상품 문서 청크를 반환합니다."""
+    """쿼리와 유사한 세법·상품 문서 청크를 반환합니다 (동일 문서 중복 제거)."""
     vs = get_vectorstore()
-    docs = vs.similarity_search(query, k=k)
-    return "\n\n---\n\n".join(f"[{d.metadata['title']}]\n{d.page_content}" for d in docs)
+    docs = vs.similarity_search(query, k=k + 3)
+    seen, unique = set(), []
+    for d in docs:
+        key = d.metadata.get("id") or d.page_content[:50]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(d)
+        if len(unique) >= k:
+            break
+    return "\n\n---\n\n".join(f"[{d.metadata['title']}]\n{d.page_content}" for d in unique)

@@ -7,9 +7,14 @@ A4 PDF로 출력한다. 한글 폰트는 Windows 기본 Malgun Gothic 사용.
 import io
 import os
 import re
+import logging
 from datetime import datetime
 
 from fpdf import FPDF
+
+# 한글 폰트 subset 시 fontTools가 내는 무해한 경고("MERG NOT subset ... dropped") 억제
+logging.getLogger("fontTools").setLevel(logging.ERROR)
+logging.getLogger("fontTools.subset").setLevel(logging.ERROR)
 
 _FONT_DIR = r"C:\Windows\Fonts"
 _FONT_REGULAR = os.path.join(_FONT_DIR, "malgun.ttf")
