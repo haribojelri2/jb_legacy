@@ -662,6 +662,10 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
                       delta_color="normal" if surplus >= 0 else "inverse")
 
             st.caption(f"운용자산: {_won_short(scenario['total_capital'])}")
+            _m10 = scenario.get("long_term_projection", {}).get("milestones", {}).get(10, {})
+            if _m10:
+                _basis = "자문료 포함 1~10년 기준" if any("자문료" in _k for _k in m) else "현재 기준"
+                st.caption(f"※ {_basis} · 10년 후 약 {_won_short(_m10.get('monthly_nominal', 0))}")
 
             st.divider()
 
