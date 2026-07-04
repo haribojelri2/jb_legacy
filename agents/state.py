@@ -27,6 +27,11 @@ class AgentState(TypedDict):
     family_notified: bool
     family_message: str
 
+    # Monitoring (EarlyWarning 조기경보 + FraudGuard 이상거래) — 그래프 노드
+    health_score: dict          # calc_health_score 결과 (exit_signal 포함)
+    fraud_alerts: dict          # analyze_transactions 결과 (alerts 포함)
+    family_alert_message: str   # 이상거래 가족 알림 텍스트
+
     # Compliance
     compliance_passed: bool
     compliance_feedback: str

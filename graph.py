@@ -33,12 +33,39 @@ Python 3.14 ModuleLock 데드락 방지: openai / langchain_openai를
 메인 스레드에서 먼저 임포트해 module lock을 해소한 뒤 병렬 스레드 실행.
 """
 
-import sys, os, sqlite3
+import sys, os, sqlite3, time, logging
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── pre-import: 병렬 스레드 실행 전 OpenAI 모듈 잠금 해소 ──
 import openai          # noqa: F401
 import langchain_openai  # noqa: F401
+
+# ── 관측성: 노드별 지연·재시도·검수 결과 구조화 로깅 (JB_LOG=1일 때) ──
+logger = logging.getLogger("jb_legacy.graph")
+if os.getenv("JB_LOG") == "1" and not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(message)s"))
+    logger.addHandler(_h)
+    logger.setLevel(logging.INFO)
+
+
+def _observe(node_name: str, fn):
+    """노드 함수를 감싸 진입/퇴출·소요시간·핵심 상태를 로깅."""
+    def _wrapped(state):
+        t0 = time.perf_counter()
+        result = fn(state)
+        if logger.isEnabledFor(logging.INFO):
+            ms = (time.perf_counter() - t0) * 1000
+            extra = ""
+            if node_name == "compliance":
+                extra = f" passed={result.get('compliance_passed')} retry={result.get('retry_count', state.get('retry_count', 0))}"
+            elif node_name == "gan_review":
+                extra = f" verdict={result.get('gan_verdict')} score={result.get('gan_score')} regen={result.get('gan_regen_needed')}"
+            elif node_name == "supervisor":
+                extra = f" agents={result.get('selected_agents')}"
+            logger.info(f"{node_name:18} {ms:7.0f}ms{extra}")
+        return result
+    return _wrapped
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -49,6 +76,7 @@ from agents.business_valuation import business_valuation_agent
 from agents.tax_succession import tax_succession_agent
 from agents.post_exit_wm import post_exit_wm_agent
 from agents.negotiation import negotiation_agent
+from agents.monitoring import monitoring_agent
 from agents.synthesizer import synthesizer_agent
 from agents.slow_ui_adapter import slow_ui_adapter
 from agents.compliance import compliance_agent
@@ -67,6 +95,7 @@ NODE_LABELS: dict[str, str] = {
     "tax_succession":     "세금·승계 분석",
     "post_exit_wm":       "자산운용 시뮬레이션",
     "negotiation":        "가족 협상 조율",
+    "monitoring":         "경영 건강·이상거래 점검",
     "synthesizer":        "종합 의견 생성",
     "slow_ui":            "UI 포맷 변환",
     "compliance":         "금소법 검수",
@@ -86,6 +115,7 @@ _AGENT_NODE_MAP = {
     "TaxSuccession":     "tax_succession",
     "PostExitWM":        "post_exit_wm",
     "Negotiation":       "negotiation",
+    "EarlyWarning":      "monitoring",
 }
 
 
@@ -119,19 +149,20 @@ def build_graph(db_path: str = _DB_PATH):
 
     g = StateGraph(AgentState)
 
-    g.add_node("supervisor",         supervisor_agent)
-    g.add_node("profiler",           profiler_agent)
+    g.add_node("supervisor",         _observe("supervisor", supervisor_agent))
+    g.add_node("profiler",           _observe("profiler", profiler_agent))
     g.add_node("dispatch",           _dispatch)
-    g.add_node("business_valuation", business_valuation_agent)
-    g.add_node("tax_succession",     tax_succession_agent)
-    g.add_node("post_exit_wm",       post_exit_wm_agent)
-    g.add_node("negotiation",        negotiation_agent)
-    g.add_node("synthesizer",        synthesizer_agent)
-    g.add_node("slow_ui",            slow_ui_adapter)
-    g.add_node("compliance",         compliance_agent)
-    g.add_node("gan_review",         gan_review_agent)
-    g.add_node("family_bridge",      family_bridge_agent)
-    g.add_node("booking",            booking_agent)
+    g.add_node("business_valuation", _observe("business_valuation", business_valuation_agent))
+    g.add_node("tax_succession",     _observe("tax_succession", tax_succession_agent))
+    g.add_node("post_exit_wm",       _observe("post_exit_wm", post_exit_wm_agent))
+    g.add_node("negotiation",        _observe("negotiation", negotiation_agent))
+    g.add_node("monitoring",         _observe("monitoring", monitoring_agent))
+    g.add_node("synthesizer",        _observe("synthesizer", synthesizer_agent))
+    g.add_node("slow_ui",            _observe("slow_ui", slow_ui_adapter))
+    g.add_node("compliance",         _observe("compliance", compliance_agent))
+    g.add_node("gan_review",         _observe("gan_review", gan_review_agent))
+    g.add_node("family_bridge",      _observe("family_bridge", family_bridge_agent))
+    g.add_node("booking",            _observe("booking", booking_agent))
 
     g.set_entry_point("supervisor")
     g.add_edge("supervisor", "profiler")
@@ -146,7 +177,8 @@ def build_graph(db_path: str = _DB_PATH):
     g.add_conditional_edges(
         "dispatch",
         _route_dispatch,
-        ["business_valuation", "tax_succession", "post_exit_wm", "negotiation", "synthesizer"],
+        ["business_valuation", "tax_succession", "post_exit_wm", "negotiation",
+         "monitoring", "synthesizer"],
     )
 
     # 병렬 fan-in
@@ -198,6 +230,9 @@ def _initial_state(
         "retirement_portfolio":  {},
         "family_notified":       False,
         "family_message":        "",
+        "health_score":          {},
+        "fraud_alerts":          {},
+        "family_alert_message":  "",
         "compliance_passed":     False,
         "compliance_feedback":   "",
         "retry_count":           0,

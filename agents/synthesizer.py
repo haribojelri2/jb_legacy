@@ -265,6 +265,25 @@ def synthesizer_agent(state: AgentState) -> dict:
             f"{target_line}"
         )
 
+    # 경영 건강 조기경보 — EarlyWarning 노드가 실행됐고 경보(exit_signal)면 권고에 반영
+    health = state.get("health_score", {})
+    health_block = ""
+    if health and health.get("exit_signal"):
+        months = health.get("suggest_exit_within_months")
+        health_block = (
+            f"\n\n[경영 조기경보 — 판단에 반드시 반영]\n"
+            f"경영 건강 점수 {health.get('overall_score')}점({health.get('overall_grade')}). "
+            f"{'; '.join(health.get('warnings', []))}\n"
+            f"엑시트 권고 시한: {months}개월 이내. "
+            f"이 경보를 근거로 매각·승계 시점을 서둘러야 함을 [최종 권고]에 명시하세요."
+        )
+    elif health and health.get("overall_grade") == "주의":
+        health_block = (
+            f"\n\n[경영 모니터링 참고]\n"
+            f"경영 건강 점수 {health.get('overall_score')}점(주의). "
+            f"{'; '.join(health.get('warnings', []))}"
+        )
+
     compliance_note = state.get("compliance_feedback", "")
     retry_instruction = (
         f"\n\n[컴플라이언스 재검토 요청]\n{compliance_note}\n위 항목을 반드시 수정하세요."
@@ -279,7 +298,8 @@ def synthesizer_agent(state: AgentState) -> dict:
             f"[전문 에이전트 분석 결과]\n\n{opinions_text}"
             f"{scenario_block}"
             f"{tax_block}"
-            f"{life_block}\n\n"
+            f"{life_block}"
+            f"{health_block}\n\n"
             f"[사용자 질문]\n{state['query']}"
             f"{retry_instruction}"
         )),
