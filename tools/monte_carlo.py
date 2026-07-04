@@ -14,12 +14,19 @@
 
 import numpy as np
 
-_MAX_SHOCKS_PER_MONTH = 5   # 월 최대 의료비 지출 발생 횟수 가정
+from config.params import PARAMS
 
-DEFAULT_LAM_ANNUAL = 0.25          # 의료비 쇼크 연평균 발생 횟수 (4년에 1회 꼴)
-DEFAULT_AVG_SHOCK  = 30_000_000    # 1회 평균 지출액 (지수분포)
-DEFAULT_SIMS       = 1_000
-DEFAULT_SEED       = 42
+# 시뮬레이션 상수는 config/params.yaml(monte_carlo)에서 주입 — 물가·의료비 전망
+# 수정 시 코드 변경 없이 반영된다.
+_MC = PARAMS["monte_carlo"]
+_MAX_SHOCKS_PER_MONTH = _MC["max_shocks_per_month"]   # 월 최대 의료비 발생 횟수 가정
+DEFAULT_LAM_ANNUAL = _MC["medical_shock"]["lam_annual"]   # 의료비 쇼크 연평균 발생 횟수
+DEFAULT_AVG_SHOCK  = _MC["medical_shock"]["avg_shock"]    # 1회 평균 지출액(지수분포)
+DEFAULT_SIMS       = _MC["sims"]
+DEFAULT_SEED       = _MC["seed"]
+DEFAULT_INFLATION  = _MC["inflation_rate"]
+DEFAULT_START_AGE  = _MC["start_age"]
+DEFAULT_TARGET_SURV = float(_MC["target_survival"])
 
 
 def generate_market_randoms(
@@ -49,7 +56,7 @@ def build_withdrawal_schedule(
     consulting_monthly: int = 0,
     consulting_months: int = 120,
     months: int = 456,
-    inflation_rate: float = 0.02,
+    inflation_rate: float = DEFAULT_INFLATION,
 ) -> np.ndarray:
     """월 순인출액 스케줄: 목표 생활비 − (국민연금 + 주택연금 + 자문료).
 
@@ -69,7 +76,7 @@ def run_retirement_mc(
     annual_std: float,
     withdrawals,
     *,
-    start_age: int = 62,
+    start_age: int = DEFAULT_START_AGE,
     randoms: tuple[np.ndarray, np.ndarray] | None = None,
     months: int = 456,
     sims: int = DEFAULT_SIMS,
@@ -149,8 +156,8 @@ def solve_target_monthly(
     consulting_monthly: int = 0,
     consulting_months: int = 120,
     months: int = 456,
-    start_age: int = 62,
-    target_survival: float = 85.0,
+    start_age: int = DEFAULT_START_AGE,
+    target_survival: float = DEFAULT_TARGET_SURV,
     hi: int = 20_000_000,
     tol: int = 10_000,
 ) -> dict:
@@ -204,7 +211,7 @@ def solve_target_monthly(
 def run_scenario_comparison(
     scenarios: dict[str, dict],
     *,
-    start_age: int = 62,
+    start_age: int = DEFAULT_START_AGE,
     months: int = 456,
     sims: int = DEFAULT_SIMS,
     lam_annual: float = DEFAULT_LAM_ANNUAL,

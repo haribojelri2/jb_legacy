@@ -16,6 +16,9 @@ from tools.monte_carlo import (
     solve_target_monthly,
 )
 from data.jb_products import JB_PRODUCTS, get_products_for_retirement
+from config.params import PARAMS as _P
+
+_WM = _P["wm"]
 
 
 # 카탈로그에서 카테고리별 최적 상품(최고 수익률) 선택
@@ -41,9 +44,9 @@ def _annuity_pmt(principal: int, annual_rate: float, years: int) -> int:
     return int(principal * r / (1 - (1 + r) ** (-n)))
 
 
-_ANNUITY_EXPENSE_RATIO = 0.07   # 즉시연금 사업비 약 7% (보험업계 평균)
-_LONGEVITY_AGE        = 85      # 기대여명 기준 나이
-_INFLATION_RATE       = 0.02    # 연 2% 물가상승률 가정
+_ANNUITY_EXPENSE_RATIO = _WM["annuity_expense_ratio"]   # 즉시연금 사업비(보험업계 평균)
+_LONGEVITY_AGE        = 85                              # 기대여명 기준 나이
+_INFLATION_RATE       = _WM["inflation_rate"]           # 연 물가상승률(params.yaml)
 
 # 한국주택금융공사 주택연금 월지급금 (1억원 기준, 종신지급 정액형, 2025년 기준)
 _HOME_PENSION_PER_100M = {
@@ -140,16 +143,12 @@ def _long_term_projection(portfolio: dict, annuity_years: int = 10,
 
 
 # 동적 배분 파라미터 (전부 전북은행·광주은행 실제 예금/연금 상품)
-_IRP_RATIO   = 0.15      # 세액공제 목적 최소 비중
-_DEPOSIT_TAX = 0.154     # 이자소득세 15.4%
-_PENSION_TAX = 0.055     # 연금소득세 평균 5.5%
+_IRP_RATIO   = _WM["irp_ratio"]       # 세액공제 목적 최소 비중
+_DEPOSIT_TAX = _WM["deposit_tax"]     # 이자소득세
+_PENSION_TAX = _WM["pension_tax"]     # 연금소득세 평균
 
-# 시나리오별 몬테카를로 가정 (예금·연금형 위주 → 저위험·저변동)
-_MC_PARAMS = {
-    "conservative": (0.030, 0.010),
-    "balanced":     (0.033, 0.012),
-    "growth":       (0.036, 0.015),
-}
+# 시나리오별 몬테카를로 가정 (params.yaml: wm.risk_returns) — 예금·연금형 위주
+_MC_PARAMS = {k: tuple(v) for k, v in _WM["risk_returns"].items()}
 
 
 def _split_taxed(pmt_gross: int, principal: int, months: int) -> int:
