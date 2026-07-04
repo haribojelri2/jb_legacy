@@ -842,6 +842,12 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
                 + ". 부족분은 주택연금 활용으로 보전할 수 있습니다."
             )
         _model = mc_comp.get("_model", {})
+        # 수익률 가정은 하드코딩 대신 실제 시뮬레이션 파라미터에서 직접 렌더링 (desync 방지)
+        _rates = ", ".join(
+            f"{_l}안 연 {_d['annual_mean']*100:.1f}%(변동성 {_d['annual_std']*100:.1f}%)"
+            for _l, _d in mc_comp.items()
+            if not _l.startswith("_") and _d and "annual_mean" in _d
+        )
         with st.expander("의료비 쇼크 모형 설명"):
             st.caption(
                 "복합 포아송 과정(CPP): 긴급 의료비가 연평균 "
@@ -849,9 +855,10 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
                 f"1회 평균 {_model.get('avg_shock', 30_000_000):,}원(지수분포) 지출을 가정합니다. "
                 f"{_model.get('sims', 1000):,}회 경로 시뮬레이션이며, "
                 "모든 시나리오가 동일한 시장 국면과 쇼크 타이밍을 겪도록 통제(CRN)했습니다. "
-                "순인출액 = 목표 생활비 − (국민연금 + 주택연금 + 자문료) 기준이고, "
-                "수익률 가정은 A 연 4.5%(변동성 6.0%), B 3.0%(1.5%), C 3.8%(4.0%)입니다. "
-                "주택연금 활용·목표 생활비 조정 시 생존 확률이 크게 달라집니다."
+                "순인출액 = 목표 생활비 − (국민연금 + 주택연금 + 자문료) 기준으로 "
+                "생활비·국민연금에 연 2% 물가상승을 반영하며, "
+                + (f"수익률 가정은 {_rates}입니다. " if _rates else "")
+                + "주택연금 활용·목표 생활비 조정 시 생존 확률이 크게 달라집니다."
             )
 
     st.caption("유의: 펀드·연금 상품은 원금 손실 가능성이 있습니다. B안은 순수익 20%, C안은 순수익 10%를 자녀에게서 10년간 자문료로 수취하는 현실적 타협안을 가정했습니다.")

@@ -49,12 +49,16 @@ def build_withdrawal_schedule(
     consulting_monthly: int = 0,
     consulting_months: int = 120,
     months: int = 456,
+    inflation_rate: float = 0.02,
 ) -> np.ndarray:
     """월 순인출액 스케줄: 목표 생활비 − (국민연금 + 주택연금 + 자문료).
 
-    자문료는 consulting_months(기본 10년) 동안만 수령. 음수면 순적립.
+    목표 생활비·국민연금은 물가연동(기본 연 2%)으로 에스컬레이션하고,
+    주택연금(정액형)·자문료(계약 고정)는 명목 고정. 자문료는
+    consulting_months(기본 10년) 동안만 수령. 음수면 순적립.
     """
-    w = np.full(months, float(target_monthly - pension_monthly - home_pension_monthly))
+    esc = (1.0 + inflation_rate) ** (np.arange(months) / 12.0)
+    w = (float(target_monthly) - float(pension_monthly)) * esc - float(home_pension_monthly)
     w[: min(consulting_months, months)] -= float(consulting_monthly)
     return w
 

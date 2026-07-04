@@ -6,7 +6,7 @@ from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from agents.post_exit_wm import build_portfolio, home_pension_monthly
-from tools.calculators import calc_goodwill_tax, estimate_business_value, calc_business_continuity
+from tools.calculators import calc_goodwill_tax, resolve_business_value, calc_business_continuity
 
 _SYSTEM = """\
 당신은 JB Legacy AI 가족 협상 조율사입니다.
@@ -75,12 +75,8 @@ def negotiation_agent(state: AgentState) -> dict:
     consulting_rate  = float(daughter.get("consulting_rate", 0.20))  # 순이익 대비 자문료율
     daughter_message = daughter.get("message", "")
 
-    # 사업체 가치
-    explicit_goodwill = biz.get("goodwill")
-    if explicit_goodwill:
-        goodwill = explicit_goodwill
-    else:
-        goodwill = estimate_business_value(monthly_profit, years_operating)["goodwill_estimate"]
+    # 사업체 가치 — 공통 헬퍼 사용 (tax_succession·post_exit_wm과 권리금 단일 출처)
+    goodwill = resolve_business_value(profile)["goodwill"]
 
     # 부모가 현금화하는 비율 = (1 - succession_rate) × 권리금
     cash_goodwill = int(goodwill * (1 - succession_rate))

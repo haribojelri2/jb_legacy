@@ -25,7 +25,7 @@ Agent 동작 구조 (이해 - 판단 - 행동 - 검증/개선):
                '재생성필요' 판정 시 개선 지시 주입 재생성(최대 1회)
 
 개선사항:
-  1. 선택적 에이전트 투입: supervisor LLM이 결정, 불필요한 에이전트 skip
+  1. 선택적 에이전트 투입: supervisor 결정 → conditional fan-out으로 선택 노드만 실행
   2. SqliteSaver 체크포인터: thread_id별 대화 상태 영속 저장
   3. stream_query: 노드 완료마다 실시간 yield → UI 라이브 업데이트
 
@@ -81,6 +81,23 @@ def _dispatch(state: AgentState) -> dict:
     return {}
 
 
+_AGENT_NODE_MAP = {
+    "BusinessValuation": "business_valuation",
+    "TaxSuccession":     "tax_succession",
+    "PostExitWM":        "post_exit_wm",
+    "Negotiation":       "negotiation",
+}
+
+
+def _route_dispatch(state: AgentState) -> list[str]:
+    """supervisor가 선택한 에이전트 노드만 실제 실행 (동적 병렬 fan-out).
+
+    미선택 노드는 실행 자체가 안 되므로 self-skip 가드·불필요한 스트림 이벤트가 없다.
+    """
+    nodes = [_AGENT_NODE_MAP[a] for a in state.get("selected_agents", []) if a in _AGENT_NODE_MAP]
+    return nodes or ["synthesizer"]
+
+
 def _route_after_profiler(state: AgentState) -> str:
     return "clarify" if state.get("clarification_needed") else "continue"
 
@@ -125,11 +142,12 @@ def build_graph(db_path: str = _DB_PATH):
         {"clarify": END, "continue": "dispatch"},
     )
 
-    # 병렬 fan-out: 4개 에이전트 동시 실행 (각 에이전트는 selected_agents 보고 skip 여부 결정)
-    g.add_edge("dispatch", "business_valuation")
-    g.add_edge("dispatch", "tax_succession")
-    g.add_edge("dispatch", "post_exit_wm")
-    g.add_edge("dispatch", "negotiation")
+    # 동적 병렬 fan-out: supervisor가 선택한 노드만 실행 (conditional edges 리스트 반환)
+    g.add_conditional_edges(
+        "dispatch",
+        _route_dispatch,
+        ["business_valuation", "tax_succession", "post_exit_wm", "negotiation", "synthesizer"],
+    )
 
     # 병렬 fan-in
     g.add_edge("business_valuation", "synthesizer")

@@ -54,11 +54,13 @@ def test_net_accumulation_survives():
 
 
 def test_consulting_expiry_in_schedule():
+    """자문료는 120개월 동안만 정확히 차감 (물가 에스컬레이션과 독립)."""
     w = build_withdrawal_schedule(3_000_000, 900_000, 0, 900_000,
                                   consulting_months=120, months=_MONTHS)
+    w_no = build_withdrawal_schedule(3_000_000, 900_000, 0, 0, months=_MONTHS)
     assert w[0] == 3_000_000 - 900_000 - 900_000
-    assert w[119] == w[0]
-    assert w[120] == 3_000_000 - 900_000
+    assert np.allclose(w[:120], w_no[:120] - 900_000)
+    assert np.allclose(w[120:], w_no[120:])
 
 
 def test_ruin_brackets_sum_with_survival():
@@ -88,6 +90,15 @@ def test_medical_shock_reduces_survival():
     no_shock = run_retirement_mc(350_000_000, 0.045, 0.06, w, months=_MONTHS,
                                  lam_annual=0.0)
     assert no_shock["survival_probability"] >= base["survival_probability"]
+
+
+def test_inflation_reduces_survival():
+    """물가상승 반영 시 인출 부담 증가 → 생존확률이 같거나 낮아야 함."""
+    w_flat = build_withdrawal_schedule(2_500_000, 900_000, months=_MONTHS, inflation_rate=0.0)
+    w_infl = build_withdrawal_schedule(2_500_000, 900_000, months=_MONTHS)  # 기본 연 2%
+    flat = run_retirement_mc(350_000_000, 0.033, 0.012, w_flat, months=_MONTHS)
+    infl = run_retirement_mc(350_000_000, 0.033, 0.012, w_infl, months=_MONTHS)
+    assert infl["survival_probability"] <= flat["survival_probability"]
 
 
 def test_goal_seek_meets_target_survival():

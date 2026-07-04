@@ -8,8 +8,7 @@ from tools.calculators import estimate_business_value
 
 
 def business_valuation_agent(state: AgentState) -> dict:
-    if "BusinessValuation" not in state.get("selected_agents", []):
-        return {}
+    # 미선택 시 그래프 conditional fan-out이 노드 자체를 실행하지 않음 (graph._route_dispatch)
     profile = state.get("user_profile", {})
     biz = profile.get("business", {})
 

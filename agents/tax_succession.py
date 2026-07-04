@@ -4,31 +4,22 @@ import os
 from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
-from tools.calculators import calc_goodwill_tax, calc_gift_tax_special, calc_gift_tax_general, estimate_business_value
+from tools.calculators import calc_goodwill_tax, calc_gift_tax_special, calc_gift_tax_general, resolve_business_value
 from rag.retriever import retrieve
 
 
 def tax_succession_agent(state: AgentState) -> dict:
-    if "TaxSuccession" not in state.get("selected_agents", []):
-        return {}
-
+    # 미선택 시 그래프 conditional fan-out이 노드 자체를 실행하지 않음 (graph._route_dispatch)
     profile = state.get("user_profile", {})
     biz = profile.get("business", {})
     monthly_profit = biz.get("monthly_profit", 4_500_000)
     years_operating = biz.get("years_operating", 30)
     other_income = monthly_profit * 12  # 연간 사업소득 (매각 연도)
 
-    # 명시적 감정가 우선, 없을 때만 수익환원법 추정 (병렬 실행으로 business_valuation 결과 불가)
-    explicit_goodwill = biz.get("goodwill")
-    if explicit_goodwill:
-        goodwill = explicit_goodwill
-        business_value = profile.get("total_business_value") or (
-            goodwill + biz.get("deposit", 0) + biz.get("equipment_value", 0)
-        )
-    else:
-        valuation = estimate_business_value(monthly_profit, years_operating)
-        goodwill = valuation["goodwill_estimate"]
-        business_value = goodwill + biz.get("deposit", 0) + biz.get("equipment_value", 0)
+    # 권리금·가치 단일 출처 — post_exit_wm과 동일한 공통 헬퍼 사용 (수치 불일치 차단)
+    resolved = resolve_business_value(profile)
+    goodwill = resolved["goodwill"]
+    business_value = resolved["business_value"]
 
     # 1. 외부 매각 시: 권리금 기타소득세
     sale_tax = calc_goodwill_tax(goodwill=goodwill, other_income=other_income)

@@ -199,6 +199,27 @@ def estimate_business_value(monthly_profit: int, years_operating: int) -> dict:
     }
 
 
+def resolve_business_value(profile: dict) -> dict:
+    """권리금·총 사업체 가치 단일 산출 — 명시 감정가 우선, 없으면 수익환원법.
+
+    tax_succession과 post_exit_wm은 병렬 실행되어 서로 결과를 공유할 수 없으므로
+    두 에이전트가 이 함수를 공통 호출해 동일한 권리금·가치를 사용한다.
+    """
+    biz = profile.get("business", {})
+    monthly_profit  = biz.get("monthly_profit", 4_500_000)
+    years_operating = biz.get("years_operating", 30)
+    explicit = biz.get("goodwill")
+    if explicit:
+        goodwill = explicit
+        business_value = profile.get("total_business_value") or (
+            goodwill + biz.get("deposit", 0) + biz.get("equipment_value", 0)
+        )
+    else:
+        goodwill = estimate_business_value(monthly_profit, years_operating)["goodwill_estimate"]
+        business_value = goodwill + biz.get("deposit", 0) + biz.get("equipment_value", 0)
+    return {"goodwill": goodwill, "business_value": business_value}
+
+
 def design_retirement_cashflow(
     total_capital: int,
     pension_monthly: int,

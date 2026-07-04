@@ -3,7 +3,12 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.llm import get_llm
 from agents.state import AgentState
-from tools.calculators import calc_goodwill_tax, estimate_business_value, calc_business_continuity
+from tools.calculators import (
+    calc_business_continuity,
+    calc_gift_tax_special,
+    calc_goodwill_tax,
+    resolve_business_value,
+)
 from tools.monte_carlo import (
     build_withdrawal_schedule,
     run_retirement_mc,
@@ -158,7 +163,8 @@ def build_portfolio(total_capital: int, pension_monthly: int,
                     consulting_monthly: int = 0, annuity_years: int = 10,
                     age: int = 62, target_monthly: int = 3_000_000,
                     home_pension_monthly: int = 0,
-                    risk_profile: str = "balanced") -> dict:
+                    risk_profile: str = "balanced",
+                    run_mc: bool = True) -> dict:
     """고객 상황(목표 생활비·연금소득·나이)에 맞춰 실제 JB 상품 비중을 동적으로 배분."""
     alloc, income = {}, {}
     irp_years = max(10, _LONGEVITY_AGE - age)
@@ -247,6 +253,8 @@ def build_portfolio(total_capital: int, pension_monthly: int,
         consulting_years=10,
     )
 
+    # run_mc=False: post_exit_wm 경로는 CRN 통제 비교(mc_comparison)로 대체되므로
+    # 내부 MC를 생략해 시나리오당 1,000경로 중복 계산을 제거
     mc_months = max((100 - age) * 12, 12)
     mc_mean, mc_std = _MC_PARAMS.get(risk_profile, _MC_PARAMS["balanced"])
     monte_carlo = run_retirement_mc(
@@ -256,7 +264,7 @@ def build_portfolio(total_capital: int, pension_monthly: int,
             consulting_monthly, months=mc_months,
         ),
         start_age=age, months=mc_months,
-    ) if total_capital > 0 else {}
+    ) if (run_mc and total_capital > 0) else {}
 
     return {
         "total_capital":        total_capital,
@@ -273,9 +281,7 @@ def build_portfolio(total_capital: int, pension_monthly: int,
 
 
 def post_exit_wm_agent(state: AgentState) -> dict:
-    if "PostExitWM" not in state.get("selected_agents", []):
-        return {}
-
+    # 미선택 시 그래프 conditional fan-out이 노드 자체를 실행하지 않음 (graph._route_dispatch)
     profile        = state.get("user_profile", {})
     personal       = profile.get("personal_assets", {})
     biz            = profile.get("business", {})
@@ -286,10 +292,11 @@ def post_exit_wm_agent(state: AgentState) -> dict:
     years_operating   = biz.get("years_operating", 10)
     annual_income     = monthly_profit * 12
 
-    # 병렬 실행이므로 business_valuation 결과 대신 직접 계산
-    valuation  = estimate_business_value(monthly_profit, years_operating)
-    goodwill   = valuation["goodwill_estimate"]
-    biz_val    = goodwill + biz.get("deposit", 0) + biz.get("equipment_value", 0)
+    # 병렬 실행이므로 business_valuation 결과 대신 공통 헬퍼로 산출 (권리금 단일 출처,
+    # 명시 감정가 분기도 tax_succession과 동일하게 적용)
+    resolved   = resolve_business_value(profile)
+    goodwill   = resolved["goodwill"]
+    biz_val    = resolved["business_value"]
     sale_tax   = calc_goodwill_tax(goodwill, other_income=annual_income).get("total_tax", 0)
 
     life = profile.get("life_factors", {})
@@ -311,7 +318,7 @@ def post_exit_wm_agent(state: AgentState) -> dict:
     portfolio_sale = build_portfolio(capital_sale, pension, age=age,
                                       target_monthly=target_monthly,
                                       home_pension_monthly=home_pension_m,
-                                      risk_profile=risk_a)
+                                      risk_profile=risk_a, run_mc=False)
 
     # ── 시나리오 B/C: 자녀의 승계 의향이 없으면 생략 ───────────────
     portfolio_succession = None
@@ -336,7 +343,16 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                                                 consulting_monthly=consulting_fee_b, age=age,
                                                 target_monthly=target_monthly,
                                                 home_pension_monthly=home_pension_m,
-                                                risk_profile=risk_b)
+                                                risk_profile=risk_b, run_mc=False)
+        # 승계 증여세(특례)는 수증자(자녀) 부담 → 가족 자산 증가분에서 차감
+        gift_tax_b = calc_gift_tax_special(business_value=biz_val).get("total_tax", 0)
+        portfolio_succession["succession_gift_tax"] = gift_tax_b
+        if continuity_full and gift_tax_b:
+            continuity_full = {
+                **continuity_full,
+                "gift_tax": gift_tax_b,
+                "family_asset_gain": continuity_full["family_asset_gain"] - gift_tax_b,
+            }
         portfolio_succession["business_continuity"] = continuity_full
 
         # 시나리오 C: 절충 — 권리금 50% 현금화, 나머지 + 보증금 + 설비는 자녀에게 승계
@@ -348,37 +364,45 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                                             consulting_monthly=consulting_fee_c, age=age,
                                             target_monthly=target_monthly,
                                             home_pension_monthly=home_pension_m,
-                                            risk_profile="balanced")
+                                            risk_profile="balanced", run_mc=False)
+        # C안 승계분(잔여 권리금 절반 + 보증금 + 설비)에 대한 특례 증여세 — 자녀 부담
+        gift_tax_c = calc_gift_tax_special(business_value=biz_val - half_goodwill).get("total_tax", 0)
+        portfolio_hybrid["succession_gift_tax"] = gift_tax_c
         # C안: 자녀가 절반만 승계하므로 누적수익·재매각가치 50% 반영
         if continuity_half:
             portfolio_hybrid["business_continuity"] = {
                 **continuity_half,
                 "daughter_cumulative_income": continuity_half["daughter_cumulative_income"] // 2,
                 "future_goodwill":            continuity_half["future_goodwill"] // 2,
+                "gift_tax":                   gift_tax_c,
                 "family_asset_gain":          (continuity_half["daughter_cumulative_income"] // 2
-                                               + continuity_half["future_goodwill"] // 2),
+                                               + continuity_half["future_goodwill"] // 2
+                                               - gift_tax_c),
             }
 
     # ── CPP 의료비 쇼크 몬테카를로 — 시나리오 간 동일 난수(CRN) 통제 비교 ──
-    # 전부 전북은행·광주은행 예금/연금형 실제 상품 기준이므로 저위험·저변동 가정.
-    # 운용자산이 클수록(매각) 예금 비중↑ → 변동성 소폭↑, 자문료가 있으면(승계) 초안정.
+    # 수익률 가정은 _MC_PARAMS 단일 출처에서 도출 (risk_profile 판단이 실제 반영됨).
+    # A: 시나리오 리스크 프로파일 / B: 소규모 자산 + 자문료 소득 위주 → 초안정 / C: 중간값
     mc_months = max((100 - age) * 12, 12)
+    _mean_a, _std_a = _MC_PARAMS.get(risk_a, _MC_PARAMS["balanced"])
+    _mean_b, _std_b = _MC_PARAMS["conservative"]
+    _mean_c, _std_c = (_mean_a + _mean_b) / 2, (_std_a + _std_b) / 2
     mc_specs = {
         "A": {
-            "k0": capital_sale, "annual_mean": 0.033, "annual_std": 0.012,
+            "k0": capital_sale, "annual_mean": _mean_a, "annual_std": _std_a,
             "withdrawals": build_withdrawal_schedule(
                 target_monthly, pension, home_pension_m, 0, months=mc_months),
         },
     }
     if portfolio_succession:
         mc_specs["B"] = {
-            "k0": capital_succession, "annual_mean": 0.030, "annual_std": 0.010,
+            "k0": capital_succession, "annual_mean": _mean_b, "annual_std": _std_b,
             "withdrawals": build_withdrawal_schedule(
                 target_monthly, pension, home_pension_m, consulting_fee_b, months=mc_months),
         }
     if portfolio_hybrid:
         mc_specs["C"] = {
-            "k0": capital_hybrid, "annual_mean": 0.031, "annual_std": 0.011,
+            "k0": capital_hybrid, "annual_mean": _mean_c, "annual_std": _std_c,
             "withdrawals": build_withdrawal_schedule(
                 target_monthly, pension, home_pension_m, consulting_fee_c, months=mc_months),
         }
