@@ -18,8 +18,10 @@ _DB_PATH = os.path.join(os.path.dirname(__file__), "chroma_db")
 _SIG_PATH = os.path.join(_DB_PATH, ".content_sig")
 _COLLECTION = "tax_law_2025"
 # 빌드 로직이 바뀌면 올린다 → 기존 캐시(중복·옛 내용)를 강제 재생성
-_BUILD_VERSION = "v3-chunked"
-_SCORE_THRESHOLD = 0.20   # 관련도 이 값 미만 청크는 무관으로 간주해 제외
+_BUILD_VERSION = "v4-cosine"
+# cosine 거리(0=동일 ~ 2=정반대) 기반 필터. 이 값 초과 청크는 무관으로 간주해 제외.
+# 정규화된 임베딩에서 관련 청크는 대개 0.6 이하, 무관 청크는 0.9 이상.
+_DISTANCE_MAX = 0.85
 _vectorstore = None
 
 _splitter = RecursiveCharacterTextSplitter(
@@ -60,10 +62,14 @@ def _embeddings():
 def _build_vectorstore() -> Chroma:
     # 항상 빈 상태에서 시작 (중복 임베딩 누적 방지)
     shutil.rmtree(_DB_PATH, ignore_errors=True)
+    # hnsw:space=cosine 명시 → 거리 값이 [0,2]로 well-defined (기본 L2는 관련도 변환이
+    # 0~1을 벗어나 임계값 필터가 무의미해지는 경고 발생)
+    _meta = {"hnsw:space": "cosine"}
     vs = Chroma(
         collection_name=_COLLECTION,
         embedding_function=_embeddings(),
         persist_directory=_DB_PATH,
+        collection_metadata=_meta,
     )
     # rmtree가 파일 잠금으로 실패해도 논리적 중복이 남지 않도록 컬렉션을 비우고 재적재
     try:
@@ -74,6 +80,7 @@ def _build_vectorstore() -> Chroma:
         _chunk_documents(), _embeddings(),
         collection_name=_COLLECTION,
         persist_directory=_DB_PATH,
+        collection_metadata=_meta,
     )
     try:
         with open(_SIG_PATH, "w", encoding="utf-8") as f:
@@ -102,6 +109,7 @@ def get_vectorstore() -> Chroma:
                 collection_name=_COLLECTION,
                 embedding_function=_embeddings(),
                 persist_directory=_DB_PATH,
+                collection_metadata={"hnsw:space": "cosine"},
             )
             # 청크 수 또는 내용(해시)이 달라졌으면 재빌드
             try:
@@ -139,13 +147,15 @@ def retrieve_scored(query: str, k: int = 3) -> list[dict]:
     """
     try:
         vs = get_vectorstore()
-        pairs = vs.similarity_search_with_relevance_scores(query, k=k + 5)
+        # cosine 거리 반환 (0=동일 ~ 2=정반대). 관련도 변환의 0~1 벗어남 경고를 피하고
+        # 거리 임계값으로 명확히 필터. 낮을수록 관련도가 높다.
+        pairs = vs.similarity_search_with_score(query, k=k + 5)
     except Exception:
         return _keyword_fallback(query, k)
 
     seen, out = set(), []
-    for doc, score in pairs:
-        if score < _SCORE_THRESHOLD:
+    for doc, distance in pairs:
+        if distance > _DISTANCE_MAX:
             continue
         did = doc.metadata.get("id")
         if did in seen:
@@ -155,7 +165,8 @@ def retrieve_scored(query: str, k: int = 3) -> list[dict]:
             "id": did,
             "title": doc.metadata.get("title", ""),
             "content": doc.page_content.strip(),
-            "score": round(float(score), 3),
+            # 표시용 유사도 = 1 - cosine거리/2 → [0,1]로 정규화
+            "score": round(max(0.0, 1.0 - float(distance) / 2.0), 3),
         })
         if len(out) >= k:
             break

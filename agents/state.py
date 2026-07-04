@@ -52,6 +52,7 @@ class AgentState(TypedDict):
 
     # Booking (PB·세무사 상담 예약)
     booking_result: dict
+    escalated: bool   # 검수 미통과 확정 → PB 상담 전환 여부
 
     # Family Negotiation — 이과장 협상 입력 & 결과
     daughter_inputs: dict    # {"succession_rate": float, "consulting_rate": float, "message": str}

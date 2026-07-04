@@ -8,7 +8,7 @@ import pytest
 
 import agents.supervisor as supervisor_mod
 from agents.supervisor import supervisor_agent, RouteDecision
-from graph import _route_dispatch, _route_compliance, _needs_booking
+from graph import _route_dispatch, _route_compliance, _needs_booking, escalation_agent
 
 
 class _StubStructured:
@@ -84,9 +84,23 @@ def test_route_compliance_pass_and_retry():
     assert _route_compliance({"compliance_passed": False, "retry_count": 0}) == "retry"
 
 
-def test_route_compliance_exhausts_retries():
-    """재시도 3회 초과면 미통과라도 pass로 라우팅(무한 루프 방지)."""
-    assert _route_compliance({"compliance_passed": False, "retry_count": 3}) == "pass"
+def test_route_compliance_exhausts_retries_escalates():
+    """재시도 3회 소진 & 미통과면 escalate로 라우팅(실패 응답 차단·PB 전환)."""
+    assert _route_compliance({"compliance_passed": False, "retry_count": 3}) == "escalate"
+    # 통과했으면 재시도 수와 무관하게 pass
+    assert _route_compliance({"compliance_passed": True, "retry_count": 3}) == "pass"
+
+
+def test_escalation_replaces_response_and_forces_booking():
+    """escalation은 실패 응답을 안전 안내로 교체하고 escalated 플래그를 세운다."""
+    out = escalation_agent({"final_response": "검수 실패한 위험한 응답"})
+    assert out["escalated"] is True
+    assert "PB" in out["final_response"] or "전문가" in out["final_response"]
+    assert "검수 실패한 위험한 응답" not in out["final_response"]
+    # booking이 escalated 플래그로 강제 실행되는지
+    from agents.booking import booking_agent  # noqa: E402
+    # (LLM 호출 없이 게이트만 확인 — needs_booking 분기)
+    assert out["escalated"]
 
 
 def test_needs_booking_keyword():

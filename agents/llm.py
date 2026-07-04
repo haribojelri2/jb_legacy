@@ -26,6 +26,24 @@ _DEFAULT_MODELS = {
 _CLAUDE_MAX_TOKENS = 8192
 
 
+def _configured_models() -> list[str]:
+    return [os.getenv(f"MODEL_{t.upper()}", _DEFAULT_MODELS[t]) for t in _DEFAULT_MODELS]
+
+
+def required_api_keys() -> dict[str, bool]:
+    """현재 모델 설정에 실제로 필요한 API 키와 설정 여부를 반환.
+
+    OpenAI: 임베딩(RAG)·STT·TTS에 항상 필요.
+    Anthropic: 설정된 모델 중 claude가 하나라도 있으면 필요.
+    OpenAI 모델을 tier에 쓰면 그 경우에도 OpenAI 키가 필요(이미 항상 필요이므로 포함).
+    """
+    models = _configured_models()
+    needed = {"OPENAI_API_KEY": True}  # 임베딩·음성 고정 필요
+    if any(m.startswith("claude") for m in models):
+        needed["ANTHROPIC_API_KEY"] = True
+    return {name: bool(os.getenv(name)) for name in needed}
+
+
 def get_llm(tier: str = "fast", temperature: float = 0.0,
             max_tokens: int | None = None) -> BaseChatModel:
     """tier: "fast" 또는 "smart". MODEL_FAST/MODEL_SMART env로 오버라이드.

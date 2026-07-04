@@ -100,6 +100,7 @@ NODE_LABELS: dict[str, str] = {
     "slow_ui":            "UI 포맷 변환",
     "compliance":         "금소법 검수",
     "gan_review":         "적대 검증 (GAN)",
+    "escalation":         "PB 상담 전환",
     "family_bridge":      "가족 리포트 공유",
     "booking":            "상담 예약",
 }
@@ -133,9 +134,31 @@ def _route_after_profiler(state: AgentState) -> str:
 
 
 def _route_compliance(state: AgentState) -> str:
-    if state.get("compliance_passed") or state.get("retry_count", 0) >= 3:
+    if state.get("compliance_passed"):
         return "pass"
+    if state.get("retry_count", 0) >= 3:
+        return "escalate"   # 재시도 소진 & 미통과 → 실패 응답 차단하고 PB 상담 전환
     return "retry"
+
+
+_ESCALATION_MESSAGE = (
+    "죄송합니다. 정확하고 안전한 안내를 위해 이 분석은 전문가의 직접 검토가 필요합니다.\n\n"
+    "AI 자동 검수(금소법·세무 면책)를 통과하지 못해, 확정되지 않은 내용을 그대로 안내드리지 않습니다.\n"
+    "담당 PB·세무사와의 상담을 연결해 드리니 아래 예약 정보를 확인해 주세요.\n\n"
+    "[주의사항]\n"
+    "1. 본 안내는 참고용이며 최종 판단은 담당 PB·세무사와 함께 하시기 바랍니다.\n"
+    "2. 세금·투자 관련 결정 전 반드시 전문가 상담을 받으시기 바랍니다."
+)
+
+
+def escalation_agent(state: AgentState) -> dict:
+    """검수 미통과 확정 시 — 실패 응답을 안전한 PB 상담 안내로 교체하고 booking 강제."""
+    return {
+        "final_response": _ESCALATION_MESSAGE,
+        "final_response_raw": _ESCALATION_MESSAGE,
+        "escalated": True,
+        "active_agents": ["Escalation"],
+    }
 
 
 def _needs_booking(state: AgentState) -> bool:
@@ -161,6 +184,7 @@ def build_graph(db_path: str = _DB_PATH):
     g.add_node("slow_ui",            _observe("slow_ui", slow_ui_adapter))
     g.add_node("compliance",         _observe("compliance", compliance_agent))
     g.add_node("gan_review",         _observe("gan_review", gan_review_agent))
+    g.add_node("escalation",         _observe("escalation", escalation_agent))
     g.add_node("family_bridge",      _observe("family_bridge", family_bridge_agent))
     g.add_node("booking",            _observe("booking", booking_agent))
 
@@ -181,25 +205,28 @@ def build_graph(db_path: str = _DB_PATH):
          "monitoring", "synthesizer"],
     )
 
-    # 병렬 fan-in
+    # 병렬 fan-in (선택 실행된 노드만 실제로 synthesizer를 트리거)
     g.add_edge("business_valuation", "synthesizer")
     g.add_edge("tax_succession",     "synthesizer")
     g.add_edge("post_exit_wm",       "synthesizer")
     g.add_edge("negotiation",        "synthesizer")
+    g.add_edge("monitoring",         "synthesizer")
 
     g.add_edge("synthesizer", "slow_ui")
     g.add_edge("slow_ui", "compliance")
     # 검증 2계층: 금소법 검수(상시) → 적대 검증 GAN(GAN_AUTO=1 시 심층 실행)
+    # 검수 미통과가 재시도 소진되면 escalation으로 라우팅해 실패 응답을 차단하고 PB 상담 전환
     g.add_conditional_edges(
         "compliance",
         _route_compliance,
-        {"retry": "synthesizer", "pass": "gan_review"},
+        {"retry": "synthesizer", "pass": "gan_review", "escalate": "escalation"},
     )
     g.add_conditional_edges(
         "gan_review",
         lambda s: "retry" if s.get("gan_regen_needed") else "pass",
         {"retry": "synthesizer", "pass": "family_bridge"},
     )
+    g.add_edge("escalation", "booking")   # 검수 실패 → PB 상담 예약 강제
     g.add_conditional_edges(
         "family_bridge",
         lambda s: "book" if _needs_booking(s) else "skip",
@@ -244,6 +271,7 @@ def _initial_state(
         "clarification_answer":  clarification_answer,
         "life_inputs":           life_inputs or {},
         "booking_result":        {},
+        "escalated":             False,
         "daughter_inputs":       daughter_inputs or {},
         "negotiation_result":    {},
         "final_response":        "",

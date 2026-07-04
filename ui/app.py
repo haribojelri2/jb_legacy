@@ -45,11 +45,16 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 st.set_page_config(page_title="JB Legacy", page_icon="🏮", layout="wide")
 
-# API 키 가드 — 분석 도중 깊은 곳에서 터지지 않도록 시작 시점에 명확히 중단
-if not os.getenv("OPENAI_API_KEY"):
+# API 키 가드 — 분석 도중 깊은 곳에서 터지지 않도록 시작 시점에 명확히 중단.
+# OpenAI: 임베딩(RAG)·STT·TTS에 항상 필요. Anthropic: 기본 추론 LLM(Claude)에 필요
+# (MODEL_FAST/SMART를 gpt로 오버라이드하면 Anthropic 불필요 → 조건부 검사).
+from agents.llm import required_api_keys as _required_api_keys  # noqa: E402
+
+_missing = [name for name, present in _required_api_keys().items() if not present]
+if _missing:
     st.error(
-        "OPENAI_API_KEY가 설정되지 않았습니다. "
-        "프로젝트 루트의 .env 파일에 키를 입력한 뒤 다시 실행해 주세요 (.env.example 참고)."
+        f"필수 API 키가 설정되지 않았습니다: {', '.join(_missing)}. "
+        "프로젝트 루트의 .env 파일에 입력한 뒤 다시 실행해 주세요 (.env.example 참고)."
     )
     st.stop()
 

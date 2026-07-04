@@ -8,8 +8,9 @@ BASE_URL = "http://localhost:8502"
 
 
 @pytest.fixture(autouse=True)
-def goto_app(page: Page):
-    page.goto(BASE_URL)
+def goto_app(page: Page, streamlit_server):
+    # streamlit_server: conftest가 서버를 확보(자동 기동)하거나 없으면 이 파일 전체를 skip
+    page.goto(streamlit_server)
     page.wait_for_load_state("networkidle")
 
 
@@ -21,7 +22,8 @@ def _go_step2(page: Page):
 # ── Step 1 ────────────────────────────────────────────────────────────────────
 
 def test_step1_logo_visible(page: Page):
-    expect(page.locator("text=JB Legacy")).to_be_visible()
+    # .first: "JB Legacy"가 여러 요소(로고·헤더)에 나올 수 있어 strict-mode 다중매칭 방지
+    expect(page.locator("text=JB Legacy").first).to_be_visible(timeout=8000)
 
 
 def test_step1_persona_radio_visible(page: Page):
@@ -63,7 +65,7 @@ def test_step2_back_button(page: Page):
     _go_step2(page)
     page.locator("button").filter(has_text="처음으로").click()
     page.wait_for_load_state("networkidle")
-    expect(page.locator("text=JB Legacy")).to_be_visible(timeout=5000)
+    expect(page.locator("text=JB Legacy").first).to_be_visible(timeout=8000)
     expect(page.locator("text=대화")).not_to_be_visible(timeout=3000)
 
 

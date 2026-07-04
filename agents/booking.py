@@ -23,9 +23,9 @@ def booking_agent(state: AgentState) -> dict:
     compliance_fb = state.get("compliance_feedback", "")
 
     needs_booking = (
-        "Booking" in selected
+        state.get("escalated")   # 검수 미통과 escalation → PB 상담 예약 강제
+        or "Booking" in selected
         or any(kw in query for kw in ["예약", "상담", "만나", "방문", "연결", "세무사", "PB"])
-        or (compliance_fb and not compliance_fb.startswith("✅") and state.get("retry_count", 0) >= 2)
     )
 
     if not needs_booking:
