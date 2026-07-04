@@ -1788,16 +1788,20 @@ def _youth_matching_section(user_id: str):
     candidates = info["candidates"]
     goodwill   = info["goodwill"]
 
-    # JB 사업 가치 헤드라인: 매칭된 청년이 인수 대출로 조달하는 신규 여신 창출 잠재액
-    new_credit = info.get("jb_new_credit_potential", 0)
-    if new_credit:
+    # JB 사업 가치 헤드라인: 인수 1건 성사 시 인수 청년의 대출 조달액 = JB 신규 여신
+    # (가게는 한 번만 매각되므로 합계가 아니라 인수자 1명 기준)
+    top_credit = info.get("jb_new_credit_top", 0)
+    lo, hi = info.get("jb_new_credit_range", (0, 0))
+    if top_credit:
+        range_note = f" (인수 청년에 따라 {lo:,}~{hi:,}원)" if lo != hi else ""
         st.markdown(
             f'<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;'
             f'padding:12px 16px;margin-bottom:10px">'
-            f'<span style="font-size:12px;color:#1e40af;font-weight:700">JB 신규 여신 고객 창출 잠재액 </span>'
-            f'<span style="font-size:18px;color:#1e3a8a;font-weight:800">{new_credit:,}원</span>'
+            f'<span style="font-size:12px;color:#1e40af;font-weight:700">인수 성사 시 JB 신규 여신 고객 창출 </span>'
+            f'<span style="font-size:18px;color:#1e3a8a;font-weight:800">약 {top_credit:,}원</span>'
+            f'<span style="font-size:11px;color:#3b82f6">{range_note}</span>'
             f'<div style="font-size:11px;color:#3b82f6;margin-top:2px">'
-            f'권리금 {goodwill:,}원을 청년이 자기자본으로 다 낼 수 없을 때, 부족분을 JB 인수 대출로 조달 → '
+            f'권리금 {goodwill:,}원 중 인수 청년이 자기자본으로 부족한 만큼을 JB 인수 대출로 조달 → '
             f'폐업 대신 상권·고용 유지 + JB 신규 여신 고객 확보</div>'
             f'</div>',
             unsafe_allow_html=True,
