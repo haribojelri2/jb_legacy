@@ -4,6 +4,7 @@ import os
 from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
+from agents.textutil import strip_markdown
 
 
 def slow_ui_adapter(state: AgentState) -> dict:
@@ -32,6 +33,7 @@ def slow_ui_adapter(state: AgentState) -> dict:
         )),
         HumanMessage(content=f"아래 내용을 어르신께 전달해주세요:\n{body}"),
     ]).content
+    adapted_body = strip_markdown(adapted_body)
 
     # 본문(쉬운 말) + 면책 고지(원문 보존) + 마무리 인사
     adapted = adapted_body.rstrip()

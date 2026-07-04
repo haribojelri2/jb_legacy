@@ -1,12 +1,16 @@
 """중앙집중식 LLM 팩토리 — 모델 선택·API 키 검증 단일화.
 
-모든 에이전트는 ChatOpenAI를 직접 생성하지 않고 get_llm()을 사용한다.
+모든 에이전트는 LLM 클라이언트를 직접 생성하지 않고 get_llm()을 사용한다.
 MODEL_SMART / MODEL_FAST 환경변수로 코드 수정 없이 모델 교체 가능.
+모델명이 "claude"로 시작하면 Anthropic(Claude), 아니면 OpenAI로 라우팅되므로
+.env 한 줄로 제공사 전환·롤백이 가능하다.
 """
 
 import os
 
 from dotenv import load_dotenv
+from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 # graph 단독 실행·테스트에서도 .env가 로드되도록 모듈 로드 시 1회 수행
@@ -14,18 +18,33 @@ from langchain_openai import ChatOpenAI
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 _DEFAULT_MODELS = {
-    "fast":  "gpt-4o-mini",   # 분류·키워드 추출·간단 변환
-    "smart": "gpt-4o",        # 복합 분석·구조화 출력
+    "fast":  "claude-opus-4-8",   # 분류·키워드 추출·간단 변환 (비용 절감: MODEL_FAST=claude-haiku-4-5)
+    "smart": "claude-opus-4-8",   # 복합 분석·구조화 출력
 }
 
+# langchain-anthropic 기본 max_tokens(1024)는 synthesizer 리포트가 잘리므로 넉넉히 지정
+_CLAUDE_MAX_TOKENS = 8192
 
-def get_llm(tier: str = "fast", temperature: float = 0.0) -> ChatOpenAI:
+
+def get_llm(tier: str = "fast", temperature: float = 0.0) -> BaseChatModel:
     """tier: "fast" 또는 "smart". MODEL_FAST/MODEL_SMART env로 오버라이드."""
+    model = os.getenv(f"MODEL_{tier.upper()}", _DEFAULT_MODELS[tier])
+    if model.startswith("claude"):
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY가 설정되지 않았습니다. "
+                "프로젝트 루트의 .env 파일에 키를 입력해 주세요 (.env.example 참고)."
+            )
+        # Opus 4.7 이후 모델은 temperature/top_p 파라미터가 제거되어 전달 시 400 에러 — 항상 생략
+        # max_retries: 시연장 네트워크 블립(연결 시간 초과) 1~2회에 그래프 전체가 죽지 않도록 방어
+        return ChatAnthropic(
+            model=model, max_tokens=_CLAUDE_MAX_TOKENS, api_key=api_key, max_retries=4
+        )
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError(
             "OPENAI_API_KEY가 설정되지 않았습니다. "
             "프로젝트 루트의 .env 파일에 키를 입력해 주세요 (.env.example 참고)."
         )
-    model = os.getenv(f"MODEL_{tier.upper()}", _DEFAULT_MODELS[tier])
-    return ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
+    return ChatOpenAI(model=model, temperature=temperature, api_key=api_key, max_retries=4)

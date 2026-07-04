@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.llm import get_llm
 from agents.state import AgentState
+from agents.textutil import strip_markdown
 from tools.calculators import get_tax_bracket
 
 
@@ -90,7 +91,7 @@ def synthesizer_agent(state: AgentState) -> dict:
             )),
         ]).content
         return {
-            "final_response": answer,
+            "final_response": strip_markdown(answer),
             "recommended_scenario": "",
             "active_agents": ["Synthesizer"],
         }
@@ -301,7 +302,7 @@ def synthesizer_agent(state: AgentState) -> dict:
     )
 
     # LLM 응답에 [계산 근거]를 [각 전문가 의견] 바로 다음에 삽입
-    llm_text = output.final_response
+    llm_text = strip_markdown(output.final_response)
     insert_marker = "[삶 적합성 분석]"
     if calc_section and insert_marker in llm_text:
         llm_text = llm_text.replace(
