@@ -9,7 +9,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 # Streamlit 재실행 시 깨진 모듈 캐시 제거
-for _k in [k for k in sys.modules if k in ("graph",) or k.startswith("agents.") or k.startswith("tools.") or k.startswith("data.")]:
+for _k in [k for k in sys.modules if k in ("graph", "config") or k.startswith("agents.") or k.startswith("tools.") or k.startswith("data.") or k.startswith("config.")]:
     del sys.modules[_k]
 
 import streamlit as st
