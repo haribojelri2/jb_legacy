@@ -22,11 +22,14 @@
 │  사업체 가치 산정  │  세금 비교    │ 노후+생존확률 │ 가족 합의안 D │
 └────────────────────────────────────────────────────────────┘
       ↓
-[Synthesizer] — 3축 분석 후 A/B/C/D 중 하나 추천 (구조화 출력 강제)
+[Synthesizer] — 3축 분석 후 A/B/C/D 중 하나 추천 (구조화 출력 강제 + 마크다운 새니타이저)
       ↓
 [SlowUIAdapter] — 이사장용 큰 글씨·쉬운 말 변환
       ↓
 [ComplianceGuard] — 불완전판매 문구 검수 (미통과 시 재생성, 최대 3회)
+      ↓
+[GANReview] — 적대 검증: Critic·Defender·Judge 토론 채점 (GAN_AUTO=1 시 실행,
+      '재생성필요' 판정이면 개선 지시 주입 후 Synthesizer 재생성 1회)
       ↓
 [FamilyBridge] — 딸(이과장)에게 공유 (선택)
       ↓
@@ -34,7 +37,17 @@
 ```
 
 그래프 밖 UI 계층 기능: 거래 안심(FraudGuard — 이상거래 탐지·가족 알림), 조기경보,
-권리금 동적 평가, 청년 매칭, 자문료 계약 플랜, PDF 리포트, TTS 음성 브리핑, what-if 전후 비교.
+권리금 동적 평가, 청년 매칭, 자문료 계약 플랜, PDF 리포트, TTS 음성 브리핑, what-if 전후 비교,
+AI 검증 탭(GAN 수동 채점 + 개선 반영 재생성 — 전후 점수 비교, 실측 68→78점 상승 확인).
+
+### 2026-07-04 고도화 (본선)
+- **LLM 전환**: 대회 지급 Claude API — `claude-opus-4-8` 기본, `agents/llm.py` 팩토리가 모델명으로
+  Anthropic/OpenAI 자동 라우팅 (`.env` 한 줄로 GPT 롤백). 임베딩·STT·TTS는 OpenAI 유지.
+- **이중 검증 루프**: 금소법 검수(상시) + GAN 적대 검증(GAN_AUTO=1, 심층). 검수는 Pydantic 구조화 판정.
+- **goal-seek 역산**: 생존확률 85% 미달 시나리오는 지속가능 월 생활비를 이분 탐색으로 자동 역산
+  (실측: A안 122만 / B안 18만 / C안 49만 — 시나리오 변별력 확보). `tools/monte_carlo.solve_target_monthly`.
+- **supervisor 강화**: 구조화 출력 라우팅 + (가족 명사 AND 공유 동사) 게이트로 FamilyBridge 오발동 제거.
+- **출력 안정화**: 마크다운 새니타이저(`agents/textutil.py`)를 synthesizer·slow_ui 출력에 적용.
 
 ---
 
