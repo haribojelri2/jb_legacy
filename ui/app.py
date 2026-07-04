@@ -2248,9 +2248,15 @@ else:
         selected_user != "lee_gwajang"
         and _has_result
     )
-    _recommended = (_result_preview or {}).get("recommended_scenario", "")
-    # 청년 매칭(외부 인수)은 A(완전매각)·C(절충, 50% 매각)에서만. B(완전승계)·D(가족합의)는 제외.
-    _show_youth = _is_sale and _recommended not in ("B", "D")
+    # 청년 매칭(외부 인수)은 "매각 시나리오가 분석에 포함되면" 노출한다.
+    # LLM 추천 시나리오(recommended_scenario)는 실행마다 바뀌는 비결정 값이라 게이트로 쓰지 않는다.
+    # 매각(A안)은 분석 시 항상 계산되므로, 사장님 분석 결과가 있으면 '팔면 누가 인수하나'는 항상 유효.
+    _portfolio = (_result_preview or {}).get("retirement_portfolio", {})
+    _has_sale = bool(
+        _portfolio.get("scenario_sale")
+        or (_result_preview or {}).get("tax_comparison", {}).get("sale")
+    )
+    _show_youth = _is_sale and _has_sale
 
     if _has_result or st.session_state.get("child_view_active"):
 
