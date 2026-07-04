@@ -1,11 +1,11 @@
 """Fraud Guard — 이상거래 탐지 + 소비흐름 분석 + 가족 알림 (DEMO MOCK).
 
 대회 지정주제 1의 "이상거래를 탐지하고 가족·보호자에게 알림" 기능.
-FDS 표준 패턴을 단순화한 룰 기반 탐지 (데모 재현성을 위해 LLM 미사용):
-  R1 고액 이탈 : 평소 지출 분포(평균+3σ) 이탈 및 100만원 초과
-  R2 심야 거래 : 00~06시 거래
-  R3 분할 결제 : 같은 날 동일 가맹점 반복 결제 합계 200만원 초과 (한도 회피 패턴)
-  R4 해외 거래 : 해외 가맹점 거래
+2단 하이브리드 — 룰(탐지) + LLM(판단):
+  [탐지] FDS 표준 룰(결정론, 재현성·미탐0):
+    R1 고액 이탈(평균+3σ, 100만↑) / R2 심야(00~06시) / R3 분할결제(동일가맹점 200만↑) / R4 해외
+  [판단] assess_alerts_llm — 룰이 잡은 후보를 LLM이 종합 판단(보이스피싱·명의도용 등 유형·
+    위험도·즉시 행동 제시). 탐지는 결정론으로 확실히, 판단은 LLM으로 지능적으로.
 
 향후 JB은행 실시간 거래 스트림·FDS API 연동 예정.
 """
@@ -13,6 +13,9 @@ FDS 표준 패턴을 단순화한 룰 기반 탐지 (데모 재현성을 위해 
 from collections import defaultdict
 from statistics import mean, pstdev
 
+from agents.llm import get_llm
+from agents.textutil import strip_markdown
+from langchain_core.messages import HumanMessage, SystemMessage
 from data.db import fetch_transactions
 
 _PERIOD_DAYS = 90
@@ -113,3 +116,46 @@ def build_family_alert(profile: dict, alerts: list[dict]) -> str:
         "전북은행 고객센터 063-250-5000 / 경찰청 112",
     ]
     return "\n".join(lines)
+
+
+def assess_alerts_llm(profile: dict, info: dict) -> dict:
+    """룰이 1차 탐지한 이상거래를 LLM이 종합 판단 — 유형·위험도·즉시 행동.
+
+    탐지(룰)는 결정론으로 확실히 잡고, 판단(LLM)은 패턴을 읽어 사기 유형과
+    대응을 제시한다. 반환: {risk_level, fraud_type, assessment}.
+    """
+    alerts = (info or {}).get("alerts", [])
+    if not alerts:
+        return {}
+    tx_lines = "\n".join(
+        f"- {a['day_offset']}일 전 {a['tx_time']} | {a['merchant']} | {a['amount']:,}원 "
+        f"| 채널 {a.get('channel', '-')} | 룰 사유: {', '.join(a['reasons'])}"
+        for a in alerts
+    )
+    llm = get_llm("smart", max_tokens=600)
+    resp = llm.invoke([
+        SystemMessage(content=(
+            "금융 이상거래(FDS) 분석 전문가입니다. 룰 기반으로 1차 탐지된 아래 거래들을 "
+            "종합적으로 판단하세요.\n"
+            "- 어떤 사기 유형이 의심되는지 (보이스피싱·전화금융사기·명의도용·스미싱·정상거래 등)\n"
+            "- 왜 그렇게 판단하는지 (거래 패턴·시간대·금액·순서 근거)\n"
+            "- 고객이 즉시 취해야 할 행동\n"
+            "을 사장님 눈높이에서 쉽게 4~6줄로 설명하세요.\n"
+            "규칙: 확실하지 않으면 단정하지 말고 '의심됩니다'로 표현. 마크다운 기호(*, #, `) 금지.\n"
+            "첫 줄은 반드시 '위험도: 높음' 또는 '위험도: 주의' 또는 '위험도: 낮음' 중 하나로 시작."
+        )),
+        HumanMessage(content=(
+            f"고객: {profile.get('age', '')}세 {profile.get('name', '고객')}\n"
+            f"월평균 정상 지출: {(info.get('monthly_spend_normal') or 0):,}원\n"
+            f"룰 1차 탐지 {len(alerts)}건:\n{tx_lines}"
+        )),
+    ]).content
+    text = strip_markdown(resp).strip()
+    first = text.splitlines()[0] if text else ""
+    if "높음" in first:
+        level = "높음"
+    elif "주의" in first:
+        level = "주의"
+    else:
+        level = "낮음"
+    return {"risk_level": level, "assessment": text}

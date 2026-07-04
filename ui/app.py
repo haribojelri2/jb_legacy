@@ -33,7 +33,7 @@ from agents.early_warning import calc_health_score
 from agents.dynamic_valuation import calc_dynamic_goodwill
 from agents.youth_matching import get_youth_matching_info
 from agents.contract_manager import build_contract_plan
-from agents.fraud_guard import analyze_transactions, build_family_alert
+from agents.fraud_guard import analyze_transactions, build_family_alert, assess_alerts_llm
 from agents.gan_tester import GANTester, TestReport
 from agents.synthesizer import synthesizer_agent
 
@@ -1810,6 +1810,25 @@ def _fraud_guard_section(user_id: str):
             f'<div style="font-size:11px;color:#6b7280">{a["day_offset"]}일 전 {a["tx_time"]} · {a["channel"]}</div>'
             f'<div style="margin-top:6px">{chips}</div>'
             f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── AI 종합 위험 판단 (룰 탐지 → LLM 판단 하이브리드) ──
+    _ai_key = f"fraud_ai_{user_id}_{len(alerts)}"
+    if _ai_key not in st.session_state:
+        with st.spinner("AI가 이상거래 위험을 판단하는 중..."):
+            st.session_state[_ai_key] = assess_alerts_llm(USERS.get(user_id, {}), info)
+    _verdict = st.session_state.get(_ai_key) or {}
+    if _verdict.get("assessment"):
+        _lv = _verdict.get("risk_level", "주의")
+        _lc = {"높음": "#dc2626", "주의": "#f59e0b", "낮음": "#16a34a"}.get(_lv, "#f59e0b")
+        st.markdown(
+            f'<div style="background:#f8f6ff;border:1px solid #c7b8f5;border-left:4px solid {_lc};'
+            f'border-radius:10px;padding:14px 16px;margin:10px 0">'
+            f'<div style="font-size:13px;font-weight:800;color:#5b21b6;margin-bottom:6px">'
+            f'🤖 AI 위험 판단 <span style="color:{_lc}">· {_lv}</span></div>'
+            f'<div style="font-size:13px;color:#1a1a2e;line-height:1.7;white-space:pre-wrap">'
+            f'{_verdict["assessment"]}</div></div>',
             unsafe_allow_html=True,
         )
 
