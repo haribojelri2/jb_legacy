@@ -1,6 +1,5 @@
 """Youth Matching Agent — 지역 청년 창업가 매칭 & 인수 대출 안내 (DEMO MOCK).
 
-본선에서 JB Legacy 플랫폼 가입 청년 창업가 DB 자체 운영 예정.
 대출 상품은 data/db.py (jb_products 테이블) 에서 관리.
 """
 
