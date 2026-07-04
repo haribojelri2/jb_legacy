@@ -133,6 +133,36 @@ def calc_gift_tax_general(business_value: int) -> dict:
     }
 
 
+def resolve_succession_tax(business_value: int, years_operating: int,
+                           entity: str = "개인") -> dict:
+    """승계 세금 시나리오 결정 — 가업 10년 요건 + 개인/법인 형태 반영.
+
+    - 10년 미만: 특례 대상 아님 → 일반 증여세
+    - 10년 이상 + 법인: 가업승계 과세특례 직접 적용
+    - 10년 이상 + 개인: 특례는 법인 주식 대상 → '법인 전환 후 승계' 시 적용(우회 전략)
+
+    반환 dict는 calc_gift_tax_* 결과에 eligible/entity/label/note(+direct_general_tax)를 추가.
+    """
+    special = calc_gift_tax_special(business_value)
+    general = calc_gift_tax_general(business_value)
+    min_years = _SPECIAL["min_years"]
+    if years_operating < min_years:
+        return {**general, "eligible": False, "entity": entity,
+                "label": "가업승계 (일반 증여세)",
+                "note": (f"가업 영위 {years_operating}년({min_years}년 미만)이라 가업승계 "
+                         f"과세특례 대상이 아니어서 일반 증여세를 적용했습니다.")}
+    if entity == "법인":
+        return {**special, "eligible": True, "entity": "법인",
+                "label": "가업승계 과세특례"}
+    return {**special, "eligible": True, "entity": "개인",
+            "label": "가업승계 특례 (법인 전환 후)",
+            "direct_general_tax": general["total_tax"],
+            "note": (f"개인사업자는 가업승계 과세특례(조특법 30조의6)를 직접 적용받을 수 "
+                     f"없습니다. 지금 바로 승계하면 일반 증여세 {general['total_tax']:,}원이지만, "
+                     f"법인 전환 후 주식을 승계하면 특례로 {special['total_tax']:,}원까지 절감할 수 "
+                     f"있습니다(전환 비용·사후관리 5년 유지 요건 별도 검토).")}
+
+
 def calc_business_continuity(
     monthly_profit: int,
     years_operating: int,

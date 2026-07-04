@@ -290,11 +290,15 @@ def run_query(
     daughter_inputs: dict | None = None,
 ) -> AgentState:
     app = build_graph()
-    config = {"configurable": {"thread_id": thread_id or user_id}}
-    return app.invoke(
+    tid = thread_id or user_id
+    config = {"configurable": {"thread_id": tid}}
+    result = app.invoke(
         _initial_state(user_id, query, clarification_answer, life_inputs, daughter_inputs),
         config=config,
     )
+    from agents.audit import log_audit
+    log_audit(user_id, query, result, tid)   # 감사 추적 적재
+    return result
 
 
 def stream_query(
@@ -319,4 +323,6 @@ def stream_query(
             yield node_name, update
 
     snapshot = app.get_state(config)
+    from agents.audit import log_audit
+    log_audit(user_id, query, snapshot.values, thread_id or user_id)   # 감사 추적 적재
     yield "__done__", snapshot.values

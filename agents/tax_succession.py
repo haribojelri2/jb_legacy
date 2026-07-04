@@ -4,7 +4,10 @@ import os
 from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
-from tools.calculators import calc_goodwill_tax, calc_gift_tax_special, calc_gift_tax_general, resolve_business_value
+from tools.calculators import (
+    calc_goodwill_tax, calc_gift_tax_general, resolve_business_value,
+    resolve_succession_tax,
+)
 from rag.retriever import retrieve
 
 
@@ -24,19 +27,11 @@ def tax_succession_agent(state: AgentState) -> dict:
     # 1. 외부 매각 시: 권리금 기타소득세
     sale_tax = calc_goodwill_tax(goodwill=goodwill, other_income=other_income)
 
-    # 2·3. 승계 세금 — 가업 10년 이상이면 과세특례(조특법 30조의6), 미만이면 일반 증여세
-    #      (특례는 '중소기업 10년 이상 영위' 요건이 있어, 미충족 시 일반 증여세로 대체)
-    special_eligible = years_operating >= 10
-    special_pure = calc_gift_tax_special(business_value=business_value)
-    general_tax  = calc_gift_tax_general(business_value=business_value)
-    if special_eligible:
-        special_tax = {**special_pure, "eligible": True, "label": "가업승계 과세특례"}
-    else:
-        special_tax = {
-            **general_tax, "eligible": False, "label": "가업승계 (일반 증여세)",
-            "note": (f"가업 영위 {years_operating}년(10년 미만)이라 가업승계 과세특례 "
-                     f"대상이 아니어서 일반 증여세를 적용했습니다."),
-        }
+    # 2·3. 승계 세금 — 가업 10년 요건 + 개인/법인 형태 반영 (순수 함수로 결정)
+    entity = (profile.get("life_factors", {}) or {}).get("entity", "개인")
+    general_tax = calc_gift_tax_general(business_value=business_value)
+    special_tax = resolve_succession_tax(business_value, years_operating, entity)
+    special_eligible = special_tax["eligible"]
 
     # RAG: 관련 세법 문서 검색
     rag_context = retrieve(state["query"] + " 가업승계 세금 권리금")
@@ -56,14 +51,17 @@ def tax_succession_agent(state: AgentState) -> dict:
             "6. 반드시 '세무사 상담 권장' 문구를 마지막에 추가하세요."
         )),
         HumanMessage(content=(
+            f"[사업자 형태] {entity} 사업자 (가업 {years_operating}년)\n"
             f"[세법 참고 자료]\n{rag_context}\n\n"
             f"[시나리오 1 - 외부 매각]\n{sale_tax['description']}\n\n"
             f"[시나리오 2 - {special_tax['label']}]\n{special_tax['description']}\n"
-            + (f"※ {special_tax['note']}\n" if not special_eligible else "")
+            + (f"※ {special_tax['note']}\n" if special_tax.get('note') else "")
             + f"\n[시나리오 3 - 일반 증여]\n{general_tax['description']}\n\n"
             f"질문: {state['query']}\n\n"
             "각 시나리오의 세금 차이, 특례 적용 조건(가업 10년 이상 등), 어느 쪽이 유리한지 설명해주세요.\n"
-            "가업 10년 미만이면 과세특례가 아니라 일반 증여세가 적용됨을 반드시 반영하세요."
+            "가업 10년 미만이면 과세특례가 아니라 일반 증여세가 적용됨을 반드시 반영하세요.\n"
+            "개인사업자는 가업승계 특례를 직접 적용받지 못하며 '법인 전환 후 주식 승계' 시에만 "
+            "특례가 적용됨을 반드시 설명하세요(법인 사업자는 직접 적용 가능)."
         )),
     ]).content
 

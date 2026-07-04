@@ -1311,6 +1311,7 @@ def _render_analysis_result(result, selected_user):
 
     with t_gan:
         _gan_test_section(result)
+        _audit_trail_section(selected_user)
 
     with t_more:
         final_for_tts = result.get("final_response_raw") or result.get("final_response", "")
@@ -1454,7 +1455,7 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
                 if submitted:
 
-                    with st.spinner("D안(합의안) 생성 중..."):
+                    with st.spinner("D안 생성 + 종합 재추천 중... (AI가 A·B·C·D를 다시 비교)"):
 
                         neg_state = {
                             **result,
@@ -1481,7 +1482,15 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
                             _nr["compliance_feedback"] = _fb
 
-                    merged = {**result, **neg_out}
+                        merged = {**result, **neg_out}
+
+                        # D안을 반영해 최종 추천 재계산 — Synthesizer가 A·B·C·D 중 최적 재선택
+                        resynth = synthesizer_agent(merged)
+                        merged = {**merged, **resynth}
+                        _rfin = merged.get("final_response_raw") or merged.get("final_response", "")
+                        if _rfin:
+                            _ok2, _fb2 = _run_compliance(_rfin)
+                            merged["compliance_feedback"] = _fb2
 
                     st.session_state["last_result"]  = merged
 
@@ -1489,7 +1498,9 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
                     st.session_state["show_negotiation_form"] = False
 
-                    st.success("D안(합의안)이 아버지 화면에 전달되었습니다!")
+                    _rec = merged.get("recommended_scenario", "")
+                    st.success(f"D안 반영 완료 — AI가 A·B·C·D를 다시 비교해 "
+                               f"{('최종 ' + _rec + '안 추천') if _rec else '재추천'}했습니다!")
 
                     st.rerun()
 
@@ -1940,6 +1951,34 @@ _VERDICT_COLOR  = {"통과": "#16a34a", "조건부통과": "#f59e0b", "재생성
 _VERDICT_ICON   = {"통과": "", "조건부통과": "", "재생성필요": ""}
 
 
+def _audit_trail_section(user_id: str):
+    """금융 감사 추적(Audit Trail) — 규제·감사 대응 이력을 DB에서 조회해 표시."""
+    from agents.audit import fetch_audit_trail
+    rows = fetch_audit_trail(limit=10, user_id=user_id)
+    if not rows:
+        return
+    st.divider()
+    st.markdown(
+        '<p class="section-label">🔒 감사 추적 (Audit Trail) '
+        '<span style="font-size:10px;background:#ede9fe;color:#5b21b6;'
+        'padding:2px 6px;border-radius:4px;margin-left:6px">규제·감사 대응</span></p>',
+        unsafe_allow_html=True)
+    st.caption("분석 1건마다 질문 해시·사용 모델·RAG 근거·컴플라이언스·GAN 검증 점수·최종안을 "
+               "jb_legacy_memory.db에 자동 기록합니다. (감사 시 판단 근거 추적 가능)")
+    display = [{
+        "시각":        r["ts"][5:16].replace("T", " "),
+        "질문해시":    r["question_hash"][:8],
+        "질문":        (r["query_preview"] or "")[:22],
+        "모델":        (r["models"] or "").split(",")[0],
+        "RAG근거":     (r["rag_sources"] or "—")[:16],
+        "컴플라이언스": ("통과" if (r["compliance"] or "").startswith("✅")
+                       else ("검토" if r["compliance"] else "—")),
+        "GAN검증":     (f'{r["gan_verdict"]}·{r["gan_score"]}' if r["gan_verdict"] else "—"),
+        "최종안":      (f'{r["final_scenario"]}안' if r["final_scenario"] else "—"),
+    } for r in rows]
+    st.dataframe(display, hide_index=True, width='stretch')
+
+
 def _gan_test_section(result: dict | None):
     """GAN 스타일 AI 응답 품질 테스트 — Critic · Defender · Judge."""
     st.markdown(
@@ -2271,6 +2310,13 @@ if st.session_state["step"] == 1:
 
                     home_pension_input = st.selectbox("주택연금 활용", ["아니오", "예"])
 
+                r3c1, _, _ = st.columns(3)
+
+                with r3c1:
+
+                    entity_input = st.selectbox("사업자 형태", ["개인", "법인"],
+                        help="가업승계 과세특례는 법인 주식이 대상 — 개인사업자는 법인 전환 후 승계 시 적용")
+
 
 
             st.markdown("")
@@ -2294,6 +2340,8 @@ if st.session_state["step"] == 1:
                         "home_pension":        home_pension_input,
 
                         "monthly_profit":      _avg_profit,
+
+                        "entity":              entity_input,
 
                     },
 
