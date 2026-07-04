@@ -1,9 +1,18 @@
 """Supervisor — LLM 기반 동적 에이전트 라우팅."""
 
-import os, json
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from agents.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
+
+
+class RouteDecision(BaseModel):
+    """라우팅 판정 — JSON 문자열 파싱(json.loads) 의존을 제거한 구조화 출력."""
+    agents: list[
+        Literal["BusinessValuation", "TaxSuccession", "PostExitWM", "FamilyBridge", "Negotiation"]
+    ] = Field(description="답변에 필요한 전문 에이전트 이름 목록")
 
 _SYSTEM = """\
 당신은 JB Legacy AI 오케스트레이터입니다.
@@ -26,10 +35,14 @@ _SYSTEM = """\
 
 규칙:
 1. 복합 주제면 복수 선택, 단일 주제면 해당 에이전트 하나만 선택
-2. 반드시 JSON만 반환: {"agents": ["Agent1", ...]}
-3. 불필요한 에이전트는 절대 포함하지 마세요"""
+2. 불필요한 에이전트는 절대 포함하지 마세요"""
 
 _CORE = ("BusinessValuation", "TaxSuccession", "PostExitWM")
+
+# 가족 공유 게이트: 명사·동사 단독으로는 발동하지 않음 (오발동 방지)
+_FAMILY_MEMBERS = ("딸", "아들", "자녀", "가족")
+_SHARE_VERBS    = ("공유", "보내", "전달", "알려")
+
 _ROUTE_MAP = {
     "BusinessValuation": "valuation",
     "TaxSuccession":     "tax",
@@ -39,24 +52,25 @@ _ROUTE_MAP = {
 
 
 def supervisor_agent(state: AgentState) -> dict:
-    llm = get_llm("fast")
-    resp = llm.invoke([
-        SystemMessage(content=_SYSTEM),
-        HumanMessage(content=state["query"]),
-    ]).content.strip()
-
+    llm = get_llm("fast").with_structured_output(RouteDecision)
     try:
-        agents = json.loads(resp).get("agents", [])
+        decision: RouteDecision = llm.invoke([
+            SystemMessage(content=_SYSTEM),
+            HumanMessage(content=state["query"]),
+        ])
+        agents = list(decision.agents)
     except Exception:
+        # 라우팅 호출 실패가 그래프 전체를 죽이지 않도록 격리 → 아래 폴백으로 코어 3개 투입
         agents = []
 
     # LLM이 핵심 에이전트를 하나도 선택 안 하면 3개 전부 기본 투입
     if not any(a in agents for a in _CORE):
         agents = list(_CORE)
 
-    # 가족 공유 키워드 감지 → FamilyBridge 자동 추가
+    # 가족 공유 감지: (가족 명사 AND 공유 동사) 조합일 때만 FamilyBridge 추가
+    # — "노후 생활비 알려줘" 같은 일반 질문에 자녀 리포트가 오발송되는 것을 방지
     q = state["query"]
-    if any(kw in q for kw in ["딸", "아들", "자녀", "알려", "공유", "보내", "전달"]):
+    if any(m in q for m in _FAMILY_MEMBERS) and any(v in q for v in _SHARE_VERBS):
         if "FamilyBridge" not in agents:
             agents.append("FamilyBridge")
 
