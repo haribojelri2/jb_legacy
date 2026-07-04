@@ -465,13 +465,16 @@ def post_exit_wm_agent(state: AgentState) -> dict:
             )
         )
 
-    llm = get_llm("smart", temperature=0.1)
+    # 이 advice는 최종 응답이 아니라 synthesizer가 재종합하는 중간 산출물이므로
+    # 간결하게(핵심 판단 근거 위주) 생성해 지연을 줄인다. 최종 다듬기는 synthesizer가 수행.
+    llm = get_llm("smart", temperature=0.1, max_tokens=1200)
     advice = llm.invoke([
         SystemMessage(content=(
             "JB금융그룹 은퇴 전문 PB입니다.\n"
             "마크다운 기호(*, **, #, `)를 절대 사용하지 마세요. 번호와 줄바꿈만 쓰세요.\n"
-            "제시된 시나리오의 노후 현금흐름을 사장님 본인 관점에서 비교하고, "
-            "각 선택의 장단점을 숫자 근거와 함께 명확히 제시하세요."
+            "제시된 시나리오의 노후 현금흐름을 사장님 본인 관점에서 비교하되, "
+            "간결하게 핵심만 쓰세요. 각 시나리오 2~3줄, 전체 12줄 이내. "
+            "장황한 설명 없이 숫자 근거와 장단점만 명확히 제시하세요."
         )),
         HumanMessage(content=(
             f"고객: {age}세 / 개인 저축 {savings:,}원 / 국민연금 월 {pension:,}원\n\n"

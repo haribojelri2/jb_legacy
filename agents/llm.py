@@ -26,8 +26,14 @@ _DEFAULT_MODELS = {
 _CLAUDE_MAX_TOKENS = 8192
 
 
-def get_llm(tier: str = "fast", temperature: float = 0.0) -> BaseChatModel:
-    """tier: "fast" 또는 "smart". MODEL_FAST/MODEL_SMART env로 오버라이드."""
+def get_llm(tier: str = "fast", temperature: float = 0.0,
+            max_tokens: int | None = None) -> BaseChatModel:
+    """tier: "fast" 또는 "smart". MODEL_FAST/MODEL_SMART env로 오버라이드.
+
+    max_tokens: 출력 상한. 중간 산출물(재종합 대상)은 낮게 캡해 지연을 줄인다.
+    미지정 시 기본값(_CLAUDE_MAX_TOKENS) — synthesizer 최종 리포트가 잘리지 않도록 넉넉.
+    """
+    tokens = max_tokens or _CLAUDE_MAX_TOKENS
     model = os.getenv(f"MODEL_{tier.upper()}", _DEFAULT_MODELS[tier])
     if model.startswith("claude"):
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -39,7 +45,7 @@ def get_llm(tier: str = "fast", temperature: float = 0.0) -> BaseChatModel:
         # Opus 4.7 이후 모델은 temperature/top_p 파라미터가 제거되어 전달 시 400 에러 — 항상 생략
         # max_retries: 시연장 네트워크 블립(연결 시간 초과) 1~2회에 그래프 전체가 죽지 않도록 방어
         return ChatAnthropic(
-            model=model, max_tokens=_CLAUDE_MAX_TOKENS, api_key=api_key, max_retries=4
+            model=model, max_tokens=tokens, api_key=api_key, max_retries=4
         )
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -47,4 +53,5 @@ def get_llm(tier: str = "fast", temperature: float = 0.0) -> BaseChatModel:
             "OPENAI_API_KEY가 설정되지 않았습니다. "
             "프로젝트 루트의 .env 파일에 키를 입력해 주세요 (.env.example 참고)."
         )
-    return ChatOpenAI(model=model, temperature=temperature, api_key=api_key, max_retries=4)
+    return ChatOpenAI(model=model, temperature=temperature, api_key=api_key,
+                      max_retries=4, max_tokens=tokens)

@@ -33,11 +33,12 @@ def tax_succession_agent(state: AgentState) -> dict:
     # RAG: 관련 세법 문서 검색
     rag_context = retrieve(state["query"] + " 가업승계 세금 권리금")
 
-    llm = get_llm("smart")
+    # 이 comparison도 synthesizer가 재종합하는 중간 산출물 → 간결하게 생성해 지연 감소
+    llm = get_llm("smart", max_tokens=1200)
     comparison = llm.invoke([
         SystemMessage(content=(
             "세무 전문가입니다. 아래 세법 자료와 계산 결과를 바탕으로 "
-            "자영업자 눈높이에서 쉽게 설명하세요.\n"
+            "자영업자 눈높이에서 간결하게 설명하세요 (핵심만, 12줄 이내).\n"
             "규칙:\n"
             "1. 세금 금액은 반드시 원 단위로 명시하세요 (예: 28,754,000원).\n"
             "2. 가업승계 과세특례(조특법 제30조의6) 적용 시 10억원 공제 조건과 10% 세율을 설명하세요.\n"
