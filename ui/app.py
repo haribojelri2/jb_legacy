@@ -2416,6 +2416,10 @@ else:
 
         or _result_preview.get("retirement_portfolio")
 
+        or _result_preview.get("health_score")
+
+        or _result_preview.get("fraud_alerts")
+
         or _result_preview.get("child_view_active")
 
     ))
