@@ -2535,22 +2535,24 @@ else:
         if not chat_history:
 
             st.markdown(
-
-                '<div style="margin-top:24px;text-align:center;color:#9ca3af;">'
-
-                '<div style="font-size:15px;font-weight:600;color:#374151;margin-bottom:8px">무엇이 궁금하신가요?</div>'
-
-                '<div style="font-size:13px;line-height:1.8">'
-
-                '매각 vs 승계 세금 비교 · 노후 현금흐름 시뮬레이션<br>'
-
-                '권리금 계산 · PB 상담 예약'
-
-                '</div></div>',
-
+                '<div style="text-align:center;margin:10px 0 14px">'
+                '<div style="font-size:18px;font-weight:800;color:#EAF2FF;letter-spacing:-0.01em">무엇이 궁금하신가요?</div>'
+                '<div style="font-size:13px;color:#B8C7E6;margin-top:6px">아래를 눌러 바로 시작하거나, 맨 아래 입력창에 직접 물어보세요</div>'
+                '</div>',
                 unsafe_allow_html=True,
-
             )
+            # 추천 질문 칩 — 탭하면 즉시 분석 실행 (STT와 동일하게 pending_query 경유)
+            _suggest = [
+                ("💡  폐업할지 승계할지 종합 분석", "폐업할지 승계할지 고민입니다. 세금이랑 노후 생활비까지 분석해주세요."),
+                ("🧾  가업승계 증여세 계산", "가업승계하면 증여세가 얼마나 나오나요?"),
+                ("📊  팔면 노후 생활비 시뮬레이션", "지금 가게를 팔면 노후 생활비가 얼마나 되나요?"),
+                ("🛡️  경영 상태·이상거래 점검", "요즘 경영 상태랑 이상거래 없는지 봐줘"),
+            ]
+            _sc = st.columns(2)
+            for _i, (_label, _sq) in enumerate(_suggest):
+                if _sc[_i % 2].button(_label, key=f"suggest_{_i}", width="stretch"):
+                    st.session_state["pending_query"] = _sq
+                    st.rerun()
 
         else:
 
@@ -2794,7 +2796,8 @@ else:
     # ── 음성 입력 (STT) — 시니어 배리어프리: 말로 질문하기 ──────────────────
     if is_slow:
 
-        _audio = st.audio_input("버튼을 누르고 질문을 말씀해 주세요 (음성 입력)", key="stt_audio")
+        with st.expander("🎤  음성으로 질문하기 — 말로 편하게 물어보세요"):
+            _audio = st.audio_input("버튼을 누르고 질문을 말씀해 주세요", key="stt_audio")
 
         if _audio is not None:
 
