@@ -245,7 +245,7 @@ div[data-testid="stExpander"] summary svg { fill: var(--jb-blue) !important; }
 
 div[data-testid="stMetric"] { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(15,27,51,0.05); }
 div[data-testid="stMetric"] label, div[data-testid="stMetric"] [data-testid="stMetricLabel"] { color: var(--ink-3) !important; }
-div[data-testid="stMetricValue"] { color: var(--ink) !important; font-weight: 800 !important; }
+div[data-testid="stMetricValue"] { color: var(--ink) !important; font-weight: 800 !important; font-size: 1.7rem !important; }
 
 /* 버튼 — JB 네이비→블루 프라이머리 */
 button[kind="primary"], button[data-testid="baseButton-primary"] {
@@ -721,7 +721,7 @@ def _tax_cards(tax: dict):
 
         st.metric("예상 세금", _won_short(special.get('total_tax', 0)),
 
-                  delta=f"-{saving:,}원 절세" if saving > 0 else None,
+                  delta=f"-{_won_short(saving)} 절세" if saving > 0 else None,
 
                   delta_color="inverse")
 
