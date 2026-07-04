@@ -1,6 +1,6 @@
 """Contract Manager — 10년 자문료 자동이체 계약 & 생애주기 알림 시뮬레이션 (DEMO MOCK).
 
-본선에서 JB은행 자동이체 API + 고객 알림 서비스 연동 예정.
+향후 JB은행 자동이체 API + 고객 알림 서비스 연동 예정.
 현재는 계약 조건 기반 시뮬레이션 데이터를 사용.
 """
 
@@ -91,6 +91,6 @@ def build_contract_plan(
         "tax_annual_estimate":   tax_annual,
         "schedule":              schedule,
         "lifecycle_events":      events,
-        "jb_auto_transfer_note": "JB은행 자동이체 등록 시 매월 자문료 자동 수취. 본선에서 API 연동 예정.",
-        "data_source":           "DEMO MOCK — 본선 JB은행 자동이체 API 연동 예정",
+        "jb_auto_transfer_note": "JB은행 자동이체 등록 시 매월 자문료 자동 수취. 향후 API 연동 예정.",
+        "data_source":           "DEMO MOCK — 향후 JB은행 자동이체 API 연동 예정",
     }

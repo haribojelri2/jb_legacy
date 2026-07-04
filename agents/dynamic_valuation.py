@@ -1,6 +1,6 @@
 """Dynamic Valuation Agent — 마이데이터 기반 권리금 동적 평가 & 엑시트 타이밍 (DEMO MOCK).
 
-본선에서 JB카드 마이데이터 API + 소상공인 상권정보 공공데이터 API 연동 예정.
+향후 JB카드 마이데이터 API + 소상공인 상권정보 공공데이터 API 연동 예정.
 현재는 mock_mydata.py 시뮬레이션 데이터를 사용.
 """
 
@@ -121,5 +121,5 @@ def calc_dynamic_goodwill(user_id: str, monthly_profit: int | None = None) -> di
         "delta_pct":              round(delta_pct, 1),
         "trend_direction":        trend["trend_direction"],
         "exit_timing":            timing,
-        "data_source":            "DEMO MOCK — 본선 마이데이터 API 연동 예정",
+        "data_source":            "DEMO MOCK — 향후 마이데이터 API 연동 예정",
     }

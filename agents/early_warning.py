@@ -1,6 +1,6 @@
 """Early Warning Agent — 폐업 조기경보 대시보드 (DEMO MOCK).
 
-본선에서 JB카드 마이데이터 API 실시간 연동 예정.
+향후 JB카드 마이데이터 API 실시간 연동 예정.
 현재는 mock_mydata.py의 시뮬레이션 데이터를 사용.
 """
 

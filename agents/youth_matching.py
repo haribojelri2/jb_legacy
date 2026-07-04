@@ -64,5 +64,5 @@ def get_youth_matching_info(user_id: str) -> dict:
             "4. 권리금 수취 + 세무사 신고 (기타소득 또는 가업승계 특례 선택)",
             "5. 운영 노하우 전수 기간 (30~90일) — 자문료 협의",
         ],
-        "data_source": "DEMO MOCK — 본선 JB Legacy 플랫폼 가입 청년 창업가 DB 자체 운영 예정",
+        "data_source": "DEMO MOCK — 향후 JB Legacy 플랫폼 가입 청년 창업가 DB 자체 운영 예정",
     }

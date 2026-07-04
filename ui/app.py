@@ -1696,7 +1696,7 @@ def _early_warning_section(user_id: str, monthly_profit: int = 0):
             tc3.metric("전년 대비", f"{trend['yoy_change_pct']:+.1f}%",
                        delta_color="normal" if trend['yoy_change_pct'] > 0 else "inverse")
 
-    st.caption("본 데이터는 데모용 시뮬레이션입니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
+    st.caption("본 데이터는 데모용 시뮬레이션입니다. 향후 JB카드 마이데이터 API 연동 예정.")
 
 
 _TIMING_COLOR = {"정상": "#16a34a", "주의": "#f59e0b", "경보": "#dc2626"}
@@ -1766,7 +1766,7 @@ def _dynamic_valuation_section(user_id: str, monthly_profit: int = 0):
             )
         st.caption(f"적용 월순이익: {dv['monthly_profit_applied']:,}원 / 매출 추세: {dv['trend_direction']}")
 
-    st.caption("본 권리금은 추정치입니다. 정확한 평가는 공인중개사·세무사 상담을 받으시기 바랍니다. 본선에서 JB카드 마이데이터 API 연동 예정.")
+    st.caption("본 권리금은 추정치입니다. 정확한 평가는 공인중개사·세무사 상담을 받으시기 바랍니다. 향후 JB카드 마이데이터 API 연동 예정.")
 
 
 _STAR = "★"
@@ -1849,7 +1849,7 @@ def _youth_matching_section(user_id: str):
             st.markdown(f'<div style="font-size:13px;color:#374151;margin:4px 0">{step}</div>',
                         unsafe_allow_html=True)
 
-    st.caption("매칭 후보는 데모용 시뮬레이션입니다. 본선에서 JB카드 청년 창업 대출 DB 연동 예정.")
+    st.caption("매칭 후보는 데모용 시뮬레이션입니다. 향후 JB카드 청년 창업 대출 DB 연동 예정.")
 
 
 def _fraud_guard_section(user_id: str):
@@ -1920,7 +1920,7 @@ def _fraud_guard_section(user_id: str):
         st.session_state[sent_key] = True
         st.rerun()
 
-    st.caption("거래내역·탐지 결과는 데모용 시뮬레이션입니다. 본선에서 JB은행 실시간 FDS 연동 예정. "
+    st.caption("거래내역·탐지 결과는 데모용 시뮬레이션입니다. 향후 JB은행 실시간 FDS 연동 예정. "
                "보이스피싱 의심 시 지급정지 요청: 전북은행 063-250-5000 / 경찰청 112")
 
 
@@ -2003,7 +2003,7 @@ def _contract_manager_section(result: dict):
         f'{plan["jb_auto_transfer_note"]}</div>',
         unsafe_allow_html=True,
     )
-    st.caption("자문료 세금은 추정치입니다. 본선에서 JB은행 자동이체 API 연동 예정.")
+    st.caption("자문료 세금은 추정치입니다. 향후 JB은행 자동이체 API 연동 예정.")
 
 
 _SEVERITY_COLOR = {"심각": "#dc2626", "보통": "#f59e0b", "경미": "#6b7280"}
