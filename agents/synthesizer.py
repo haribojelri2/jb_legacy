@@ -50,6 +50,16 @@ _SYSTEM = """\
 이유: 구체적 수치를 근거로 3~4줄 이내로 설명하세요."""
 
 
+_DISCLAIMER = (
+    "\n[주의사항]\n"
+    "1. 세금 수치는 추정치이며 실제 세액은 개인 상황에 따라 달라질 수 있습니다.\n"
+    "2. 세무사 상담을 권장드립니다.\n"
+    "3. 투자 상품(펀드·연금)은 원금 손실 가능성이 있습니다.\n"
+    "4. 펀드·연금 가입 전 위험등급을 반드시 확인하시기 바랍니다.\n"
+    "5. 최종 결정은 고객 본인과 담당 PB·세무사가 함께 하시기 바랍니다."
+)
+
+
 def synthesizer_agent(state: AgentState) -> dict:
     selected = state.get("selected_agents", [])
 
@@ -110,7 +120,7 @@ def synthesizer_agent(state: AgentState) -> dict:
             )),
         ]).content
         return {
-            "final_response": strip_markdown(answer),
+            "final_response": strip_markdown(answer) + "\n" + _DISCLAIMER,
             "recommended_scenario": "",
             "active_agents": ["Synthesizer"],
         }
