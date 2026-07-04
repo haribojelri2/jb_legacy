@@ -821,6 +821,25 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
             })
             st.bar_chart(ruin_df, x_label="고갈 연령 구간", y_label="고갈 확률(%)", height=260)
             st.caption("자산 고갈 시점 분포 (구간별 %)")
+        # 검증→개선: 생존확률 85% 미달 시나리오의 지속가능 생활비 역산 결과
+        _goal_parts = []
+        for _label, _data in mc_comp.items():
+            if _label.startswith("_") or not _data:
+                continue
+            _gs = _data.get("goal_seek")
+            if not _gs:
+                continue
+            if _gs.get("achievable") and _gs.get("sustainable_monthly", 0) > 0:
+                _goal_parts.append(
+                    f"{_label}안 월 {_gs['sustainable_monthly']:,}원 "
+                    f"(생존율 {_gs['survival_probability']:.0f}%)"
+                )
+        if _goal_parts:
+            st.info(
+                "💡 AI 개선 제안 — 목표 생존확률 85%를 달성하려면 생활비를 이 수준으로 조정하세요: "
+                + " · ".join(_goal_parts)
+                + ". 부족분은 주택연금 활용으로 보전할 수 있습니다."
+            )
         _model = mc_comp.get("_model", {})
         with st.expander("의료비 쇼크 모형 설명"):
             st.caption(

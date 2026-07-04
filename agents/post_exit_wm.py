@@ -8,6 +8,7 @@ from tools.monte_carlo import (
     build_withdrawal_schedule,
     run_retirement_mc,
     run_scenario_comparison,
+    solve_target_monthly,
 )
 from data.jb_products import JB_PRODUCTS, get_products_for_retirement
 
@@ -382,6 +383,28 @@ def post_exit_wm_agent(state: AgentState) -> dict:
                 target_monthly, pension, home_pension_m, consulting_fee_c, months=mc_months),
         }
     mc_comparison = run_scenario_comparison(mc_specs, start_age=age, months=mc_months)
+
+    # 검증→개선: 생존확률이 목표(85%) 미달인 시나리오는 달성 가능한
+    # 지속가능 월 생활비를 역산해 개선안으로 제시 (CRN 고정 → 결정론)
+    _GOAL_SURVIVAL = 85.0
+    _consulting_by_label = {
+        "A": 0,
+        "B": consulting_fee_b if "B" in mc_specs else 0,
+        "C": consulting_fee_c if "C" in mc_specs else 0,
+    }
+    for _label, _spec in mc_specs.items():
+        _mc = mc_comparison.get(_label)
+        if not _mc or _mc["survival_probability"] >= _GOAL_SURVIVAL:
+            continue
+        _gs = solve_target_monthly(
+            _spec["k0"], _spec["annual_mean"], _spec["annual_std"],
+            pension_monthly=pension, home_pension_monthly=home_pension_m,
+            consulting_monthly=_consulting_by_label.get(_label, 0),
+            months=mc_months, start_age=age, target_survival=_GOAL_SURVIVAL,
+        )
+        if _gs:
+            _mc["goal_seek"] = _gs
+
     # 각 포트폴리오의 생존확률을 통제 비교 결과로 교체 (동일 난수 기준)
     if mc_comparison.get("A"):
         portfolio_sale["monte_carlo"] = mc_comparison["A"]

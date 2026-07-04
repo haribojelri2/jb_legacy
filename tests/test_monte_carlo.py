@@ -7,6 +7,7 @@ from tools.monte_carlo import (
     generate_market_randoms,
     run_retirement_mc,
     run_scenario_comparison,
+    solve_target_monthly,
 )
 
 _MONTHS = (100 - 62) * 12
@@ -87,3 +88,27 @@ def test_medical_shock_reduces_survival():
     no_shock = run_retirement_mc(350_000_000, 0.045, 0.06, w, months=_MONTHS,
                                  lam_annual=0.0)
     assert no_shock["survival_probability"] >= base["survival_probability"]
+
+
+def test_goal_seek_meets_target_survival():
+    """역산된 지속가능 생활비는 실제로 목표 생존확률을 달성해야 함."""
+    gs = solve_target_monthly(300_000_000, 0.033, 0.012,
+                              pension_monthly=900_000, months=_MONTHS,
+                              target_survival=85.0)
+    assert gs["achievable"]
+    assert gs["sustainable_monthly"] > 0
+    assert gs["survival_probability"] >= 85.0
+
+
+def test_goal_seek_monotonic_in_capital():
+    """운용자산이 클수록 지속가능 생활비가 같거나 높아야 함."""
+    small = solve_target_monthly(100_000_000, 0.033, 0.012, months=_MONTHS)
+    big = solve_target_monthly(500_000_000, 0.033, 0.012, months=_MONTHS)
+    assert big["sustainable_monthly"] >= small["sustainable_monthly"]
+
+
+def test_goal_seek_deterministic():
+    """CRN 고정 시드 → 같은 입력은 항상 같은 역산 결과."""
+    a = solve_target_monthly(300_000_000, 0.033, 0.012, months=_MONTHS)
+    b = solve_target_monthly(300_000_000, 0.033, 0.012, months=_MONTHS)
+    assert a == b

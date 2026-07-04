@@ -135,6 +135,68 @@ def run_retirement_mc(
     }
 
 
+def solve_target_monthly(
+    k0: int,
+    annual_mean: float,
+    annual_std: float,
+    *,
+    pension_monthly: int = 0,
+    home_pension_monthly: int = 0,
+    consulting_monthly: int = 0,
+    consulting_months: int = 120,
+    months: int = 456,
+    start_age: int = 62,
+    target_survival: float = 85.0,
+    hi: int = 20_000_000,
+    tol: int = 10_000,
+) -> dict:
+    """목표 생존확률(%)을 달성하는 최대 지속가능 월 생활비 역산 (이분 탐색).
+
+    CRN(시드 고정) 덕분에 같은 생활비는 항상 같은 생존확률을 내고,
+    생활비가 낮을수록 생존확률은 단조 증가 → 탐색이 결정론적으로 수렴한다.
+    반환: {sustainable_monthly, survival_probability, target_survival, achievable}
+    """
+    if k0 <= 0:
+        return {}
+
+    randoms = generate_market_randoms(months)  # 탐색 전체에서 동일 난수 공유
+
+    def _survival(monthly: int) -> float:
+        w = build_withdrawal_schedule(
+            monthly, pension_monthly, home_pension_monthly,
+            consulting_monthly, consulting_months, months,
+        )
+        res = run_retirement_mc(k0, annual_mean, annual_std, w,
+                                start_age=start_age, randoms=randoms, months=months)
+        return res["survival_probability"]
+
+    lo = 0
+    if _survival(hi) >= target_survival:
+        lo = hi  # 상한에서도 달성 → 사실상 제약 없음
+    elif _survival(lo) < target_survival:
+        # 순적립 상태(생활비 0)여도 의료비 쇼크만으로 목표 미달 → 달성 불가
+        return {
+            "sustainable_monthly": 0,
+            "survival_probability": _survival(lo),
+            "target_survival": target_survival,
+            "achievable": False,
+        }
+    else:
+        while hi - lo > tol:
+            mid = (lo + hi) // 2
+            if _survival(mid) >= target_survival:
+                lo = mid
+            else:
+                hi = mid
+
+    return {
+        "sustainable_monthly": int(lo),
+        "survival_probability": _survival(lo),
+        "target_survival": target_survival,
+        "achievable": True,
+    }
+
+
 def run_scenario_comparison(
     scenarios: dict[str, dict],
     *,
