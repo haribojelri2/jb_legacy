@@ -1291,13 +1291,23 @@ def _render_analysis_result(result, selected_user):
             _negotiation_section(neg, _nego_child)
         else:
             st.caption(f"{_nego_child}의 협상 조건이 제안되면 합의안(D안)이 여기에 표시됩니다.")
+        # 자녀 공유 = 문자 링크 전송 모델: ① 문자 전송 확인 → ② 자녀가 링크를 연 화면으로 전환
         _child_id = (USERS.get(selected_user, {}).get("family") or [None])[0]
-        if _child_id and st.button(
-            f"{USERS[_child_id]['name']}에게 공유 / 협상 시작 →", width='stretch', key="share_child"):
-            st.session_state["split_result"]      = result
-            st.session_state["child_parent_user"] = selected_user
-            st.session_state["selected_user"]     = _child_id
-            st.rerun()
+        if _child_id:
+            _cname = USERS[_child_id]["name"]
+            if st.session_state.get("sms_sent_child") == _child_id:
+                st.success(f"📩 {_cname}님 휴대폰(010-****-1234)으로 리포트 링크를 문자로 전송했습니다.")
+                if st.button(f"{_cname}이(가) 링크 열기 →", width='stretch',
+                             key="open_child", type="primary"):
+                    st.session_state["split_result"]      = result
+                    st.session_state["child_parent_user"] = selected_user
+                    st.session_state["selected_user"]     = _child_id
+                    st.session_state.pop("sms_sent_child", None)
+                    st.rerun()
+            elif st.button(f"{_cname}에게 공유 (문자 링크 전송) →",
+                           width='stretch', key="share_child"):
+                st.session_state["sms_sent_child"] = _child_id
+                st.rerun()
 
     with t_gan:
         _gan_test_section(result)
@@ -2872,7 +2882,7 @@ else:
 
             st.session_state["selected_user"]     = _cid
 
-            reply = f"분석 결과를 {USERS[_cid]['name']}에게 공유하고 자녀 화면으로 전환했습니다. 검토 후 협상안(D안)을 제안할 수 있어요."
+            reply = f"{USERS[_cid]['name']}님에게 리포트 링크를 문자로 전송하고 자녀 화면을 열었습니다. 검토 후 협상안(D안)을 제안할 수 있어요."
 
             chat_history.append({"role": "assistant", "content": reply})
 
