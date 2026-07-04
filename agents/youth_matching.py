@@ -15,11 +15,19 @@ def get_youth_matching_info(user_id: str) -> dict:
     biz           = profile.get("business", {})
     goodwill      = biz.get("goodwill", 0)
 
+    total_new_credit = 0
     for c in candidates:
-        total_available  = c["budget"] + (c["loan_limit"] if c["loan_eligible"] else 0)
-        c["can_afford"]      = total_available >= goodwill
-        c["funding_gap"]     = max(goodwill - total_available, 0)
-        c["total_available"] = total_available
+        # 인수 자금 조달 구조: 자기자본으로 부족한 만큼을 JB 인수 대출로 충당한다.
+        # 이 대출액이 곧 JB 신규 여신 고객 창출액 — 청년 매칭의 핵심 사업 가치.
+        loan_needed = max(goodwill - c["budget"], 0)             # 대출로 조달할 인수 자금
+        loan_ok     = c["loan_eligible"] and loan_needed <= c["loan_limit"]
+        c["loan_needed"]     = loan_needed
+        c["loan_ok"]         = loan_ok
+        c["jb_new_credit"]   = loan_needed if loan_ok else 0      # JB 신규 여신 창출액
+        c["can_afford"]      = c["budget"] >= goodwill or loan_ok
+        c["total_available"] = c["budget"] + (c["loan_limit"] if c["loan_eligible"] else 0)
+        c["funding_gap"]     = 0 if c["can_afford"] else max(goodwill - c["total_available"], 0)
+        total_new_credit    += c["jb_new_credit"]
 
     # UI 표시용 포맷 변환
     formatted_loans = [
@@ -38,6 +46,8 @@ def get_youth_matching_info(user_id: str) -> dict:
         "candidates":    candidates,
         "loan_products": formatted_loans,
         "goodwill":      goodwill,
+        # 매칭된 청년들이 인수 대출로 조달하는 총액 = JB 신규 여신 창출 잠재액
+        "jb_new_credit_potential": total_new_credit,
         "transfer_steps": [
             "1. JB Legacy 플랫폼 매칭 후 비공개 인수 의향서 교환",
             "2. JB은행 또는 정부지원 창업자금 사전 승인 (영업일 3~5일)",

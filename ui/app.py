@@ -162,6 +162,234 @@ html, body, [class*="css"] { font-family: 'Noto Sans KR', sans-serif; }
 
 """, unsafe_allow_html=True)
 
+st.markdown("""
+
+<style>
+
+:root {
+  --jb-bg: #07134A;
+  --jb-bg-2: #0B1F5E;
+  --jb-panel: rgba(255, 255, 255, 0.94);
+  --jb-panel-soft: rgba(247, 250, 255, 0.88);
+  --jb-line: rgba(255, 255, 255, 0.16);
+  --jb-ink: #0A1024;
+  --jb-muted: #6B7894;
+  --jb-blue: #4DA3FF;
+  --jb-cyan: #40E0D0;
+  --jb-gold: #F5C542;
+}
+
+.stApp {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(64, 224, 208, 0.18), transparent 28%),
+    radial-gradient(circle at 92% 4%, rgba(77, 163, 255, 0.24), transparent 30%),
+    linear-gradient(135deg, var(--jb-bg) 0%, #081845 45%, #050916 100%);
+}
+
+.block-container {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+  max-width: 1240px;
+}
+
+header[data-testid="stHeader"] {
+  background: transparent;
+}
+
+.ob-logo {
+  color: #FFFFFF !important;
+  font-size: 42px !important;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px !important;
+}
+
+.ob-logo::after {
+  content: "AI wealth transition cockpit";
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin-top: 10px;
+  padding: 7px 12px;
+  border: 1px solid rgba(64, 224, 208, 0.35);
+  border-radius: 999px;
+  color: #BDEFFF;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ob-sub {
+  color: rgba(234, 242, 255, 0.78) !important;
+  font-size: 15px !important;
+}
+
+.ob-group,
+.panel-label,
+.section-label {
+  color: #B8C7E6 !important;
+}
+
+.s2-header {
+  border: 1px solid var(--jb-line) !important;
+  border-radius: 18px;
+  padding: 14px 18px !important;
+  margin-bottom: 18px !important;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+}
+
+.s2-title {
+  color: #FFFFFF !important;
+  font-size: 18px !important;
+}
+
+.s2-meta {
+  color: rgba(234, 242, 255, 0.72) !important;
+}
+
+.analysis-divider {
+  border-left: 1px solid rgba(255, 255, 255, 0.18) !important;
+}
+
+.response-box,
+.rationale-box,
+.booking-box,
+.tax-card {
+  background: var(--jb-panel) !important;
+  color: var(--jb-ink) !important;
+  border: 1px solid rgba(77, 163, 255, 0.18) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16) !important;
+}
+
+.response-box {
+  border-left: 5px solid var(--jb-blue) !important;
+}
+
+.rationale-box {
+  border-left: 5px solid var(--jb-cyan) !important;
+}
+
+.booking-box {
+  border-left: 5px solid var(--jb-gold) !important;
+}
+
+.agent-card {
+  background: rgba(3, 10, 35, 0.86) !important;
+  border: 1px solid rgba(77, 163, 255, 0.22);
+  border-radius: 16px !important;
+}
+
+.agent-on {
+  color: #40E0D0 !important;
+}
+
+.agent-off {
+  color: rgba(184, 199, 230, 0.42) !important;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"],
+div[data-testid="stExpander"],
+div[data-testid="stForm"] {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-radius: 16px !important;
+}
+
+div[data-testid="stMetric"] {
+  background: var(--jb-panel-soft);
+  border: 1px solid rgba(77, 163, 255, 0.18);
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+div[data-testid="stMetric"] label,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] {
+  color: var(--jb-muted) !important;
+}
+
+button[kind="primary"],
+button[data-testid="baseButton-primary"] {
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, #4DA3FF 0%, #40E0D0 100%) !important;
+  color: #04112D !important;
+  font-weight: 800 !important;
+  box-shadow: 0 16px 38px rgba(64, 224, 208, 0.22);
+}
+
+button[data-testid="baseButton-secondary"] {
+  border-radius: 999px !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #F4F8FF !important;
+}
+
+div[data-baseweb="tab-list"] {
+  gap: 8px;
+}
+
+button[data-baseweb="tab"] {
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(234, 242, 255, 0.82) !important;
+}
+
+button[data-baseweb="tab"][aria-selected="true"] {
+  background: rgba(77, 163, 255, 0.22) !important;
+  color: #FFFFFF !important;
+}
+
+div[data-testid="stChatMessage"] {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--jb-ink);
+  border: 1px solid rgba(77, 163, 255, 0.14);
+}
+
+textarea,
+input,
+div[data-baseweb="select"] > div {
+  border-radius: 14px !important;
+}
+
+div[data-testid="stRadio"] label,
+div[data-testid="stRadio"] label p,
+div[data-testid="stSelectbox"] label,
+div[data-testid="stSelectbox"] label p,
+div[data-testid="stNumberInput"] label,
+div[data-testid="stNumberInput"] label p {
+  color: rgba(234, 242, 255, 0.86) !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label,
+div[data-testid="stRadio"] [role="radiogroup"] label p {
+  color: rgba(234, 242, 255, 0.78) !important;
+}
+
+div[data-testid="stCaptionContainer"] {
+  color: rgba(184, 199, 230, 0.74) !important;
+}
+
+@media (max-width: 768px) {
+  .block-container {
+    padding-top: 1rem;
+  }
+  .ob-logo {
+    font-size: 34px !important;
+  }
+  .analysis-divider {
+    border-left: 0 !important;
+    padding-left: 0 !important;
+  }
+}
+
+</style>
+
+""", unsafe_allow_html=True)
+
 
 
 ALL_AGENTS = ["Supervisor", "Profiler", "BusinessValuation",
@@ -1559,21 +1787,43 @@ def _youth_matching_section(user_id: str):
 
     candidates = info["candidates"]
     goodwill   = info["goodwill"]
-    cols       = st.columns(len(candidates))
 
+    # JB 사업 가치 헤드라인: 매칭된 청년이 인수 대출로 조달하는 신규 여신 창출 잠재액
+    new_credit = info.get("jb_new_credit_potential", 0)
+    if new_credit:
+        st.markdown(
+            f'<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;'
+            f'padding:12px 16px;margin-bottom:10px">'
+            f'<span style="font-size:12px;color:#1e40af;font-weight:700">JB 신규 여신 고객 창출 잠재액 </span>'
+            f'<span style="font-size:18px;color:#1e3a8a;font-weight:800">{new_credit:,}원</span>'
+            f'<div style="font-size:11px;color:#3b82f6;margin-top:2px">'
+            f'권리금 {goodwill:,}원을 청년이 자기자본으로 다 낼 수 없을 때, 부족분을 JB 인수 대출로 조달 → '
+            f'폐업 대신 상권·고용 유지 + JB 신규 여신 고객 확보</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    cols = st.columns(len(candidates))
     for col, c in zip(cols, candidates):
         with col:
             afford_color = "#16a34a" if c["can_afford"] else "#f59e0b"
             afford_text  = "인수 가능" if c["can_afford"] else f"자금 {c['funding_gap']:,}원 부족"
+            # 인수 대출로 조달하는 금액 = JB 신규 여신
+            if c.get("loan_ok") and c.get("loan_needed"):
+                fund_line = (
+                    f'자기자금 {c["budget"]:,}원  +  '
+                    f'<span style="color:#1d4ed8;font-weight:600">JB 인수대출 {c["loan_needed"]:,}원</span>'
+                )
+            else:
+                fund_line = (f'자기자금 {c["budget"]:,}원'
+                             + (f'  +  대출한도 {c["loan_limit"]:,}원' if c["loan_eligible"] else ""))
             st.markdown(
                 f'<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;">'
                 f'<div style="font-weight:700;font-size:15px">{c["name"]} ({c["age"]}세)</div>'
                 f'<div style="font-size:12px;color:#6b7280">{c["region"]} · 신뢰도 {_STAR * int(c["rating"]//1)} {c["rating"]}</div>'
                 f'<div style="font-size:12px;margin:8px 0;color:#374151">{c["intro"]}</div>'
                 f'<div style="font-size:12px;color:{afford_color};font-weight:600">{afford_text}</div>'
-                f'<div style="font-size:11px;color:#9ca3af">자기자금 {c["budget"]:,}원'
-                + (f'  +  대출 {c["loan_limit"]:,}원' if c["loan_eligible"] else "")
-                + '</div>'
+                f'<div style="font-size:11px;color:#9ca3af">{fund_line}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
