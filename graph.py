@@ -18,8 +18,11 @@ Agent 동작 구조 (이해 - 판단 - 행동 - 검증/개선):
             수정안 생성(compliance 피드백 → synthesizer 재생성),
             알림(family_bridge / fraud_guard 가족 통지),
             요약(synthesizer·slow_ui·TTS), 예약(booking)
-  검증/개선  compliance 검수 루프 — 미통과 시 지적사항 반영 재생성,
-            retry_count >= 3 종료 조건(초과 시 PB 연결 전환)
+  검증/개선  이중 검증 루프:
+            1) compliance 검수(상시) — 미통과 시 지적사항 반영 재생성,
+               retry_count >= 3 종료 조건(초과 시 PB 연결 전환)
+            2) gan_review 적대 검증(GAN_AUTO=1) — Critic·Defender·Judge 토론 채점,
+               '재생성필요' 판정 시 개선 지시 주입 재생성(최대 1회)
 
 개선사항:
   1. 선택적 에이전트 투입: supervisor LLM이 결정, 불필요한 에이전트 skip
@@ -49,6 +52,7 @@ from agents.negotiation import negotiation_agent
 from agents.synthesizer import synthesizer_agent
 from agents.slow_ui_adapter import slow_ui_adapter
 from agents.compliance import compliance_agent
+from agents.gan_tester import gan_review_agent
 from agents.family_bridge import family_bridge_agent
 from agents.booking import booking_agent
 
@@ -66,6 +70,7 @@ NODE_LABELS: dict[str, str] = {
     "synthesizer":        "종합 의견 생성",
     "slow_ui":            "UI 포맷 변환",
     "compliance":         "금소법 검수",
+    "gan_review":         "적대 검증 (GAN)",
     "family_bridge":      "가족 리포트 공유",
     "booking":            "상담 예약",
 }
@@ -107,6 +112,7 @@ def build_graph(db_path: str = _DB_PATH):
     g.add_node("synthesizer",        synthesizer_agent)
     g.add_node("slow_ui",            slow_ui_adapter)
     g.add_node("compliance",         compliance_agent)
+    g.add_node("gan_review",         gan_review_agent)
     g.add_node("family_bridge",      family_bridge_agent)
     g.add_node("booking",            booking_agent)
 
@@ -133,9 +139,15 @@ def build_graph(db_path: str = _DB_PATH):
 
     g.add_edge("synthesizer", "slow_ui")
     g.add_edge("slow_ui", "compliance")
+    # 검증 2계층: 금소법 검수(상시) → 적대 검증 GAN(GAN_AUTO=1 시 심층 실행)
     g.add_conditional_edges(
         "compliance",
         _route_compliance,
+        {"retry": "synthesizer", "pass": "gan_review"},
+    )
+    g.add_conditional_edges(
+        "gan_review",
+        lambda s: "retry" if s.get("gan_regen_needed") else "pass",
         {"retry": "synthesizer", "pass": "family_bridge"},
     )
     g.add_conditional_edges(
@@ -171,6 +183,10 @@ def _initial_state(
         "compliance_passed":     False,
         "compliance_feedback":   "",
         "retry_count":           0,
+        "gan_score":             0,
+        "gan_verdict":           "",
+        "gan_regen_needed":      False,
+        "gan_retry_count":       0,
         "clarification_needed":  "",
         "clarification_answer":  clarification_answer,
         "life_inputs":           life_inputs or {},

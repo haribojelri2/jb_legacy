@@ -35,6 +35,7 @@ from agents.youth_matching import get_youth_matching_info
 from agents.contract_manager import build_contract_plan
 from agents.fraud_guard import analyze_transactions, build_family_alert
 from agents.gan_tester import GANTester, TestReport
+from agents.synthesizer import synthesizer_agent
 
 from agents.llm import get_llm
 
@@ -1127,7 +1128,8 @@ def _render_analysis_result(result, selected_user):
     """분석 결과를 서브탭으로 분리 렌더링 (세금 / 노후 설계 / 가족 협상 / 상담·리포트)."""
     recommended = result.get("recommended_scenario", "")
     neg = result.get("negotiation_result", {})
-    t_tax, t_wm, t_nego, t_more = st.tabs(["세금 비교", "노후 설계", "가족 협상(D안)", "상담·리포트"])
+    t_tax, t_wm, t_nego, t_gan, t_more = st.tabs(
+        ["세금 비교", "노후 설계", "가족 협상(D안)", "AI 검증", "상담·리포트"])
 
     with t_tax:
         _tax_cards(result.get("tax_comparison", {}))
@@ -1144,6 +1146,9 @@ def _render_analysis_result(result, selected_user):
             st.session_state["split_result"] = result
             st.session_state["child_view_active"] = True
             st.rerun()
+
+    with t_gan:
+        _gan_test_section(result)
 
     with t_more:
         final_for_tts = result.get("final_response_raw") or result.get("final_response", "")
@@ -1831,6 +1836,11 @@ def _gan_test_section(result: dict | None):
         unsafe_allow_html=True,
     )
 
+    # ── 개선 전후 점수 비교 (재생성 후 재채점 시) ─────────────────────────
+    prev_score = st.session_state.get("gan_prev_score")
+    if prev_score is not None and prev_score != total:
+        st.success(f"검증→개선 루프 결과: {prev_score}점 → {total}점 ({total - prev_score:+d}점)")
+
     # ── 판정 요약 ─────────────────────────────────────────────────────────
     st.markdown(
         f'<div style="background:#f8f6ff;border-left:4px solid #5b21b6;'
@@ -1849,6 +1859,32 @@ def _gan_test_section(result: dict | None):
                 f'color:#92400e;margin:4px 0">{imp}</div>',
                 unsafe_allow_html=True,
             )
+
+    # ── 검증→개선: 판정 미통과 시 Judge 지적사항을 synthesizer에 되먹임 ──
+    if fs.key_improvements and fs.verdict != "통과":
+        if st.button("개선 반영 재생성 — Judge 지적사항 주입", type="primary",
+                     width='stretch', key="gan_regen"):
+            feedback = (
+                "GAN 품질 검수(공격자-방어자-심판)의 지적사항입니다. "
+                "아래 항목을 반드시 반영해 다시 작성하세요:\n"
+                + "\n".join(f"{i}. {imp}" for i, imp in enumerate(fs.key_improvements, 1))
+            )
+            with st.spinner("Judge 지적사항을 반영해 응답 재생성 중... (약 30초)"):
+                regen = synthesizer_agent({**result, "compliance_feedback": feedback})
+            new_fr = regen.get("final_response", "")
+            if new_fr:
+                updated = {**result, "final_response": new_fr, "final_response_raw": new_fr}
+                if regen.get("recommended_scenario"):
+                    updated["recommended_scenario"] = regen["recommended_scenario"]
+                st.session_state["last_result"]    = updated
+                st.session_state["gan_prev_score"] = total
+                st.session_state.pop("gan_report", None)
+                st.session_state.pop("gan_cache_key", None)
+                st.session_state.pop("pdf_cache", None)   # 응답 변경 → PDF 캐시 무효화
+                st.rerun()
+            else:
+                st.error("재생성에 실패했습니다. 다시 시도해 주세요.")
+        st.caption("재생성 후 'GAN 테스트 시작'을 다시 누르면 개선 전후 점수가 비교됩니다.")
 
     # ── 토론 과정 ─────────────────────────────────────────────────────────
     for rd in report.rounds:
@@ -1896,6 +1932,7 @@ def _gan_test_section(result: dict | None):
     if st.button("테스트 초기화", key="gan_reset"):
         st.session_state.pop("gan_report", None)
         st.session_state.pop("gan_cache_key", None)
+        st.session_state.pop("gan_prev_score", None)
         st.rerun()
 
 

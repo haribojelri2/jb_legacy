@@ -162,7 +162,8 @@ class GANTester:
         self._judge_llm = get_llm("smart")
 
     def _critic(self, query: str, response: str, prior: str) -> CritiqueResult:
-        return self._llm.with_structured_output(CritiqueResult).invoke([
+        # method="json_schema": 디코딩 단계에서 스키마 강제 — 중첩 리스트 필드 누락 방지
+        return self._llm.with_structured_output(CritiqueResult, method="json_schema").invoke([
             SystemMessage(content=_CRITIC_SYSTEM),
             HumanMessage(content=(
                 f"[사용자 질문]\n{query}\n\n"
@@ -177,7 +178,7 @@ class GANTester:
             f"[{p.category} / {p.severity}] {p.issue}"
             for p in critique.points
         )
-        return self._llm.with_structured_output(DefenseResult).invoke([
+        return self._llm.with_structured_output(DefenseResult, method="json_schema").invoke([
             SystemMessage(content=_DEFENDER_SYSTEM),
             HumanMessage(content=(
                 f"[AI 응답]\n{response}\n\n"
@@ -198,7 +199,7 @@ class GANTester:
                 debate_text += f"[방어 - {d.category}]\n{d.rebuttal}\n인정: {d.concession}\n"
             debate_text += f"[방어 종합]\n{r.defense.overall_justification}\n"
 
-        return self._judge_llm.with_structured_output(JudgeResult).invoke([
+        return self._judge_llm.with_structured_output(JudgeResult, method="json_schema").invoke([
             SystemMessage(content=_JUDGE_SYSTEM),
             HumanMessage(content=(
                 f"[사용자 질문]\n{query}\n\n"
@@ -227,3 +228,44 @@ class GANTester:
             rounds=rounds,
             final_score=self._judge(query, ai_response, rounds),
         )
+
+
+# ── 그래프용 적대 검증 노드 ───────────────────────────────────────────────────
+
+_GAN_MAX_RETRY = 1  # GAN 지적사항 기반 재생성은 응답당 1회로 제한 (지연·비용 상한)
+
+
+def gan_review_agent(state) -> dict:
+    """compliance 통과 후 적대 검증 — GAN_AUTO=1일 때만 실행.
+
+    '재생성필요' 판정이면 Judge의 개선 지시를 compliance_feedback 경로로 주입해
+    synthesizer 재생성을 트리거한다 (검증→개선 루프의 심층 검증 계층).
+    """
+    if os.getenv("GAN_AUTO", "0") != "1":
+        return {"gan_regen_needed": False}
+
+    response = state.get("final_response", "")
+    if not response:
+        return {"gan_regen_needed": False}
+
+    report = GANTester(rounds=1).run(query=state.get("query", ""), ai_response=response)
+    fs = report.final_score
+    result = {
+        "gan_score":        fs.total_score,
+        "gan_verdict":      fs.verdict,
+        "gan_regen_needed": False,
+        "active_agents":    ["GANReview"],
+    }
+    if (
+        fs.verdict == "재생성필요"
+        and fs.key_improvements
+        and state.get("gan_retry_count", 0) < _GAN_MAX_RETRY
+    ):
+        result["gan_regen_needed"] = True
+        result["gan_retry_count"]  = state.get("gan_retry_count", 0) + 1
+        result["compliance_feedback"] = (
+            "적대 검증(공격자-방어자-심판)의 지적사항입니다. "
+            "아래 항목을 반드시 반영해 다시 작성하세요:\n"
+            + "\n".join(f"{i}. {imp}" for i, imp in enumerate(fs.key_improvements, 1))
+        )
+    return result

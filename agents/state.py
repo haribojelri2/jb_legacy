@@ -32,6 +32,12 @@ class AgentState(TypedDict):
     compliance_feedback: str
     retry_count: int
 
+    # GAN 적대 검증 (GAN_AUTO=1일 때 그래프 내 자동 실행)
+    gan_score: int
+    gan_verdict: str        # 통과 | 조건부통과 | 재생성필요 | ""
+    gan_regen_needed: bool  # True면 synthesizer 재생성으로 라우팅
+    gan_retry_count: int    # GAN 기반 재생성 횟수 (최대 1회)
+
     # Clarification (추가 질문)
     clarification_needed: str   # 비어있으면 추가 질문 불필요
     clarification_answer: str   # 사용자 답변
