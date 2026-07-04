@@ -269,7 +269,8 @@ div[data-baseweb="tab-highlight"] { background: var(--jb-blue) !important; }
 
 /* 채팅 */
 div[data-testid="stChatMessage"] { border-radius: 16px; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
-div[data-testid="stBottomBlockContainer"] { background: transparent !important; }
+div[data-testid="stBottomBlockContainer"] { background: transparent !important; max-width: 1080px !important; margin-left: auto !important; margin-right: auto !important; }
+div[data-testid="stChatInput"] { border-radius: 16px !important; }
 
 /* 입력 */
 textarea, input, div[data-baseweb="select"] > div { border-radius: 10px !important; border-color: var(--line) !important; }
@@ -2418,7 +2419,9 @@ else:
 
     if _has_result or st.session_state.get("child_view_active"):
 
-        col_chat, col_analysis = st.columns([1.1, 1], gap="large")
+        # 결과가 있을 때만 카드를 넓혀 분석 아티팩트에 충분한 폭 확보
+        st.markdown("<style>.block-container{max-width:1400px !important;}</style>", unsafe_allow_html=True)
+        col_chat, col_analysis = st.columns([1, 1.55], gap="large")
 
     else:
 
