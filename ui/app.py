@@ -165,227 +165,130 @@ html, body, [class*="css"] { font-family: 'Noto Sans KR', sans-serif; }
 st.markdown("""
 
 <style>
-
 :root {
-  --jb-bg: #07134A;
-  --jb-bg-2: #0B1F5E;
-  --jb-panel: rgba(255, 255, 255, 0.94);
-  --jb-panel-soft: rgba(247, 250, 255, 0.88);
-  --jb-line: rgba(255, 255, 255, 0.16);
-  --jb-ink: #0A1024;
-  --jb-muted: #6B7894;
-  --jb-blue: #4DA3FF;
-  --jb-cyan: #40E0D0;
-  --jb-gold: #F5C542;
+  --jb-navy-1: #07134A;
+  --jb-navy-2: #0B1F5E;
+  --surface: #FFFFFF;
+  --surface-2: #F4F7FC;
+  --ink: #0F1B33;
+  --ink-2: #43506B;
+  --ink-3: #8494B0;
+  --line: #E6ECF5;
+  --jb-blue: #1E5BD6;
+  --jb-blue-dark: #14449E;
+  --jb-cyan: #17A9A0;
+  --jb-gold: #C7952B;
 }
 
+/* 외곽: 다크 네이비 프레임 (JB 아이덴티티) */
 .stApp {
   background:
-    radial-gradient(circle at 12% 8%, rgba(64, 224, 208, 0.18), transparent 28%),
-    radial-gradient(circle at 92% 4%, rgba(77, 163, 255, 0.24), transparent 30%),
-    linear-gradient(135deg, var(--jb-bg) 0%, #081845 45%, #050916 100%);
+    radial-gradient(circle at 12% 8%, rgba(64,224,208,0.10), transparent 26%),
+    radial-gradient(circle at 92% 4%, rgba(77,163,255,0.14), transparent 28%),
+    linear-gradient(135deg, var(--jb-navy-1) 0%, #081845 45%, #050916 100%) !important;
 }
+header[data-testid="stHeader"] { background: transparent; }
 
+/* 안쪽: 깔끔한 라이트 컨텐츠 서피스 (프레임 안에 떠 있는 앱 카드) */
 .block-container {
-  padding-top: 2rem;
-  padding-bottom: 2rem;
-  max-width: 1240px;
+  max-width: 1080px;
+  background: var(--surface);
+  border-radius: 24px;
+  padding: 2.4rem 2.6rem 3rem !important;
+  margin-top: 1.6rem;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.35);
 }
 
-header[data-testid="stHeader"] {
-  background: transparent;
-}
-
-.ob-logo {
-  color: #FFFFFF !important;
-  font-size: 42px !important;
-  letter-spacing: -0.02em;
-  margin-bottom: 8px !important;
-}
-
+/* 타이포 — 라이트 서피스라 어두운 글씨 */
+.ob-logo { color: var(--jb-navy-2) !important; font-size: 40px !important; font-weight: 800 !important; letter-spacing: -0.03em; margin-bottom: 6px !important; }
 .ob-logo::after {
-  content: "AI wealth transition cockpit";
-  display: block;
-  width: max-content;
-  max-width: 100%;
-  margin-top: 10px;
-  padding: 7px 12px;
-  border: 1px solid rgba(64, 224, 208, 0.35);
-  border-radius: 999px;
-  color: #BDEFFF;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  content: "자영업자 은퇴·승계 AI 도우미";
+  display: block; width: max-content; max-width: 100%;
+  margin-top: 12px; padding: 6px 12px; border-radius: 999px;
+  color: var(--jb-blue); background: #EAF1FC;
+  font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: none;
 }
-
-.ob-sub {
-  color: rgba(234, 242, 255, 0.78) !important;
-  font-size: 15px !important;
-}
-
-.ob-group,
-.panel-label,
-.section-label {
-  color: #B8C7E6 !important;
-}
+.ob-sub { color: var(--ink-3) !important; font-size: 15px !important; line-height: 1.6; }
+.ob-group, .panel-label, .section-label { color: var(--ink-3) !important; font-weight: 700 !important; letter-spacing: 0.5px !important; }
 
 .s2-header {
-  border: 1px solid var(--jb-line) !important;
-  border-radius: 18px;
-  padding: 14px 18px !important;
-  margin-bottom: 18px !important;
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--line) !important; border-radius: 16px;
+  padding: 14px 18px !important; margin-bottom: 18px !important;
+  background: var(--surface-2); box-shadow: none;
 }
+.s2-title { color: var(--jb-navy-2) !important; font-size: 18px !important; font-weight: 800 !important; }
+.s2-meta { color: var(--ink-3) !important; }
+.analysis-divider { border-left: 1px solid var(--line) !important; }
 
-.s2-title {
-  color: #FFFFFF !important;
-  font-size: 18px !important;
+/* 카드류 */
+.response-box, .rationale-box, .booking-box, .tax-card {
+  background: var(--surface) !important; color: var(--ink) !important;
+  border: 1px solid var(--line) !important; border-radius: 16px !important;
+  box-shadow: 0 1px 3px rgba(15,27,51,0.06) !important;
 }
+.response-box { border-left: 4px solid var(--jb-blue) !important; }
+.rationale-box { border-left: 4px solid var(--jb-cyan) !important; }
+.booking-box { border-left: 4px solid var(--jb-blue) !important; }
 
-.s2-meta {
-  color: rgba(234, 242, 255, 0.72) !important;
-}
-
-.analysis-divider {
-  border-left: 1px solid rgba(255, 255, 255, 0.18) !important;
-}
-
-.response-box,
-.rationale-box,
-.booking-box,
-.tax-card {
-  background: var(--jb-panel) !important;
-  color: var(--jb-ink) !important;
-  border: 1px solid rgba(77, 163, 255, 0.18) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16) !important;
-}
-
-.response-box {
-  border-left: 5px solid var(--jb-blue) !important;
-}
-
-.rationale-box {
-  border-left: 5px solid var(--jb-cyan) !important;
-}
-
-.booking-box {
-  border-left: 5px solid var(--jb-gold) !important;
-}
-
-.agent-card {
-  background: rgba(3, 10, 35, 0.86) !important;
-  border: 1px solid rgba(77, 163, 255, 0.22);
-  border-radius: 16px !important;
-}
-
-.agent-on {
-  color: #40E0D0 !important;
-}
-
-.agent-off {
-  color: rgba(184, 199, 230, 0.42) !important;
-}
-
+/* 위젯 컨테이너 */
 div[data-testid="stVerticalBlockBorderWrapper"],
 div[data-testid="stExpander"],
 div[data-testid="stForm"] {
-  border-color: rgba(255, 255, 255, 0.14) !important;
-  background: rgba(255, 255, 255, 0.06) !important;
-  border-radius: 16px !important;
+  border-color: var(--line) !important; background: var(--surface-2) !important; border-radius: 14px !important;
 }
+/* expander 헤더 — 어두운 글씨(잘 보이게) */
+div[data-testid="stExpander"] summary,
+div[data-testid="stExpander"] summary p,
+div[data-testid="stExpander"] summary span,
+div[data-testid="stExpander"] summary div { color: var(--jb-navy-2) !important; font-weight: 700 !important; }
+div[data-testid="stExpander"] summary svg { fill: var(--jb-blue) !important; }
 
-div[data-testid="stMetric"] {
-  background: var(--jb-panel-soft);
-  border: 1px solid rgba(77, 163, 255, 0.18);
-  border-radius: 16px;
-  padding: 12px 14px;
+div[data-testid="stMetric"] { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(15,27,51,0.05); }
+div[data-testid="stMetric"] label, div[data-testid="stMetric"] [data-testid="stMetricLabel"] { color: var(--ink-3) !important; }
+div[data-testid="stMetricValue"] { color: var(--ink) !important; font-weight: 800 !important; }
+
+/* 버튼 — JB 네이비→블루 프라이머리 */
+button[kind="primary"], button[data-testid="baseButton-primary"] {
+  border: 0 !important; border-radius: 12px !important;
+  background: linear-gradient(135deg, var(--jb-navy-2), var(--jb-blue)) !important;
+  color: #FFFFFF !important; font-weight: 700 !important; padding: 0.6rem 1rem !important;
+  box-shadow: 0 8px 20px rgba(30,91,214,0.20) !important;
 }
-
-div[data-testid="stMetric"] label,
-div[data-testid="stMetric"] [data-testid="stMetricLabel"] {
-  color: var(--jb-muted) !important;
-}
-
-button[kind="primary"],
-button[data-testid="baseButton-primary"] {
-  border: 0 !important;
-  border-radius: 999px !important;
-  background: linear-gradient(135deg, #4DA3FF 0%, #40E0D0 100%) !important;
-  color: #04112D !important;
-  font-weight: 800 !important;
-  box-shadow: 0 16px 38px rgba(64, 224, 208, 0.22);
-}
-
+button[kind="primary"]:hover, button[data-testid="baseButton-primary"]:hover { filter: brightness(1.07); }
 button[data-testid="baseButton-secondary"] {
-  border-radius: 999px !important;
-  border-color: rgba(255, 255, 255, 0.24) !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: #F4F8FF !important;
+  border-radius: 12px !important; border: 1px solid var(--line) !important;
+  background: var(--surface) !important; color: var(--ink-2) !important; font-weight: 600 !important;
 }
+button[data-testid="baseButton-secondary"]:hover { background: var(--surface-2) !important; border-color: #CFD9EA !important; color: var(--jb-navy-2) !important; }
 
-div[data-baseweb="tab-list"] {
-  gap: 8px;
-}
+/* 탭 — 라이트 언더라인 */
+div[data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--line); }
+button[data-baseweb="tab"] { background: transparent !important; color: var(--ink-3) !important; font-weight: 600 !important; border-radius: 8px 8px 0 0 !important; }
+button[data-baseweb="tab"][aria-selected="true"] { background: transparent !important; color: var(--jb-blue) !important; }
+div[data-baseweb="tab-highlight"] { background: var(--jb-blue) !important; }
 
-button[data-baseweb="tab"] {
-  border-radius: 999px !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: rgba(234, 242, 255, 0.82) !important;
-}
+/* 채팅 */
+div[data-testid="stChatMessage"] { border-radius: 16px; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
+div[data-testid="stBottomBlockContainer"] { background: transparent !important; }
 
-button[data-baseweb="tab"][aria-selected="true"] {
-  background: rgba(77, 163, 255, 0.22) !important;
-  color: #FFFFFF !important;
-}
+/* 입력 */
+textarea, input, div[data-baseweb="select"] > div { border-radius: 10px !important; border-color: var(--line) !important; }
 
-div[data-testid="stChatMessage"] {
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--jb-ink);
-  border: 1px solid rgba(77, 163, 255, 0.14);
-}
-
-textarea,
-input,
-div[data-baseweb="select"] > div {
-  border-radius: 14px !important;
-}
-
-div[data-testid="stRadio"] label,
-div[data-testid="stRadio"] label p,
-div[data-testid="stSelectbox"] label,
-div[data-testid="stSelectbox"] label p,
-div[data-testid="stNumberInput"] label,
-div[data-testid="stNumberInput"] label p {
-  color: rgba(234, 242, 255, 0.86) !important;
-}
-
-div[data-testid="stRadio"] [role="radiogroup"] label,
-div[data-testid="stRadio"] [role="radiogroup"] label p {
-  color: rgba(234, 242, 255, 0.78) !important;
-}
-
-div[data-testid="stCaptionContainer"] {
-  color: rgba(184, 199, 230, 0.74) !important;
-}
+/* 라벨 */
+div[data-testid="stRadio"] label, div[data-testid="stRadio"] label p,
+div[data-testid="stSelectbox"] label, div[data-testid="stSelectbox"] label p,
+div[data-testid="stNumberInput"] label, div[data-testid="stNumberInput"] label p { color: var(--ink-2) !important; font-weight: 600 !important; }
+div[data-testid="stRadio"] [role="radiogroup"] label, div[data-testid="stRadio"] [role="radiogroup"] label p { color: var(--ink-2) !important; }
+div[data-testid="stCaptionContainer"] { color: var(--ink-3) !important; }
+.agent-card { background: #0A1330 !important; border: 1px solid rgba(77,163,255,0.22); border-radius: 14px !important; }
+.agent-on { color: #17A9A0 !important; }
+.agent-off { color: #9AA7C0 !important; }
 
 @media (max-width: 768px) {
-  .block-container {
-    padding-top: 1rem;
-  }
-  .ob-logo {
-    font-size: 34px !important;
-  }
-  .analysis-divider {
-    border-left: 0 !important;
-    padding-left: 0 !important;
-  }
+  .block-container { padding: 1.4rem 1.2rem !important; margin-top: 0.8rem; border-radius: 18px; }
+  .ob-logo { font-size: 32px !important; }
+  .analysis-divider { border-left: 0 !important; padding-left: 0 !important; }
 }
-
 </style>
 
 """, unsafe_allow_html=True)
@@ -2537,8 +2440,8 @@ else:
 
             st.markdown(
                 '<div style="text-align:center;margin:10px 0 14px">'
-                '<div style="font-size:18px;font-weight:800;color:#EAF2FF;letter-spacing:-0.01em">무엇이 궁금하신가요?</div>'
-                '<div style="font-size:13px;color:#B8C7E6;margin-top:6px">아래를 눌러 바로 시작하거나, 맨 아래 입력창에 직접 물어보세요</div>'
+                '<div style="font-size:18px;font-weight:800;color:#0B1F5E;letter-spacing:-0.01em">무엇이 궁금하신가요?</div>'
+                '<div style="font-size:13px;color:#8494B0;margin-top:6px">아래를 눌러 바로 시작하거나, 맨 아래 입력창에 직접 물어보세요</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
