@@ -1007,6 +1007,46 @@ def _child_name_of(parent_id: str) -> str:
     return USERS.get(fam[0], {}).get("name", "자녀") if fam else "자녀"
 
 
+_SCEN_NAME = {"A": ("완전 매각", "scenario_sale"), "B": ("완전 승계", "scenario_succession"),
+              "C": ("절충안", "scenario_hybrid")}
+
+
+def _dplan_verdict(state: dict) -> str:
+    """자녀 D안 vs 기존 추천안을 짧게 AI가 판정 (전체 재합성 대신 경량 LLM 1회)."""
+    neg = state.get("negotiation_result", {})
+    d_sc = neg.get("scenario_negotiated", {})
+    if not d_sc:
+        return ""
+    cond = neg.get("daughter_conditions", {})
+    d_m = d_sc.get("monthly_income", {}).get("합계", 0)
+    d_cont = d_sc.get("business_continuity", {})
+    rec = state.get("recommended_scenario", "")
+    rec_name, key = _SCEN_NAME.get(rec, ("추천안", ""))
+    rec_sc = (state.get("retirement_portfolio", {}) or {}).get(key, {}) or {}
+    rec_m = rec_sc.get("monthly_income", {}).get("합계", 0)
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from agents.llm import get_llm
+        from agents.textutil import strip_markdown
+        txt = get_llm("smart", max_tokens=400).invoke([
+            SystemMessage(content=(
+                "가족 은퇴·승계 조율사입니다. 자녀가 제안한 가족 합의안 D를 기존 AI 추천안과 "
+                "비교해 부모 노후·가족 자산 관점에서 어느 쪽이 나은지 3~4줄로 판정하세요. "
+                "마크다운 기호(*,#,`) 금지. 첫 줄은 'D안 채택 권장' 또는 '기존 추천 유지 권장' "
+                "중 하나로 시작하고, 구체 수치를 근거로 드세요. 마지막에 세무사·PB 상담 권장 한 줄.")),
+            HumanMessage(content=(
+                f"기존 AI 추천: {rec_name}({rec or '-'}안) — 부모 월수령 {rec_m:,}원\n"
+                f"자녀 제안 D안 — 승계 {cond.get('succession_rate',0)*100:.0f}%, "
+                f"자문료 {cond.get('consulting_rate',0)*100:.0f}%, 부모 월수령 {d_m:,}원, "
+                f"자녀 10년 누적 {d_cont.get('daughter_cumulative_income',0):,}원, "
+                f"가족 총자산 증가 {d_cont.get('family_asset_gain',0):,}원\n"
+                f"자녀의 한마디: \"{cond.get('message','')}\"")),
+        ]).content
+        return strip_markdown(txt).strip()
+    except Exception:
+        return ""
+
+
 def _negotiation_section(negotiation_result: dict, child_name: str = "자녀"):
     """자녀가 제안한 D안(합의안) 섹션 — 사장님 분석 패널에 표시."""
 
@@ -1067,6 +1107,16 @@ def _negotiation_section(negotiation_result: dict, child_name: str = "자녀"):
     )
 
     mc2.metric("운용자산", _won_short(total_capital))
+
+    # AI 판정 — D안 vs 기존 추천안 (경량 LLM 판정)
+    _verdict = negotiation_result.get("ai_verdict", "")
+    if _verdict:
+        _vc = "#16a34a" if _verdict.startswith("D안") else "#1E5BD6"
+        st.markdown(
+            f'<div style="background:#eef6ff;border:1px solid #bcd4f5;border-left:4px solid {_vc};'
+            f'border-radius:0 8px 8px 0;padding:12px 16px;margin-top:14px;font-size:13.5px;'
+            f'color:#1a1a2e;line-height:1.7;white-space:pre-wrap">🤖 AI 판정 · D안 vs 추천안\n\n{_verdict}</div>',
+            unsafe_allow_html=True)
 
     # 자산 배분 내역
     alloc = scenario.get("allocation", {})
@@ -1455,7 +1505,7 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
                 if submitted:
 
-                    with st.spinner("D안 생성 + 종합 재추천 중... (AI가 A·B·C·D를 다시 비교)"):
+                    with st.spinner("D안 생성 + AI 판정 중... (D안 vs 추천안 비교)"):
 
                         neg_state = {
                             **result,
@@ -1483,18 +1533,10 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
                             _nr["compliance_feedback"] = _fb
 
                         merged = {**result, **neg_out}
-                        # 핵심 에이전트 목록 보존(+Negotiation) — 안 하면 synthesizer가
-                        # 단일 에이전트로 오판해 D 미주입 직행 경로를 타 재추천이 안 됨
-                        merged["active_agents"] = (
-                            list(result.get("active_agents", [])) + ["Negotiation"])
-
-                        # D안을 반영해 최종 추천 재계산 — Synthesizer가 A·B·C·D 중 최적 재선택
-                        resynth = synthesizer_agent(merged)
-                        merged = {**merged, **resynth}
-                        _rfin = merged.get("final_response_raw") or merged.get("final_response", "")
-                        if _rfin:
-                            _ok2, _fb2 = _run_compliance(_rfin)
-                            merged["compliance_feedback"] = _fb2
+                        # 가볍게: A/B/C는 그대로 두고, D안 vs 기존 추천안만 짧게 AI 판정.
+                        # (전체 재합성 대신 경량 LLM 한 번 — 빠르면서도 AI가 실제 판단)
+                        _verdict = _dplan_verdict(merged)
+                        _nr["ai_verdict"] = _verdict
 
                     st.session_state["last_result"]  = merged
 
@@ -1502,17 +1544,14 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
                     st.session_state["show_negotiation_form"] = False
 
-                    # 재추천 결과를 부모 채팅에 새 메시지로 남겨 화면에 반영
-                    _rec = merged.get("recommended_scenario", "")
-                    _new_answer = merged.get("final_response", "")
-                    if _new_answer:
+                    # AI 판정을 부모 채팅에 새 메시지로 남겨 화면에 반영
+                    if _verdict:
                         _hist = st.session_state.get("chat_history", [])
                         _hist.append({"role": "assistant",
-                            "content": f"👨‍👩‍👧 가족 합의안 D를 반영해 다시 분석했습니다.\n\n{_new_answer}"})
+                            "content": f"👨‍👩‍👧 가족 합의안 D 검토\n\n{_verdict}"})
                         st.session_state["chat_history"] = _hist
 
-                    st.success(f"D안 반영 완료 — AI가 A·B·C·D를 다시 비교해 "
-                               f"{('최종 ' + _rec + '안 추천') if _rec else '재추천'}했습니다!")
+                    st.success("D안 생성 완료 — AI가 기존 추천안과 비교해 판정했습니다!")
 
                     st.rerun()
 
