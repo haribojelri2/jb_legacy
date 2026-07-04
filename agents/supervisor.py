@@ -69,13 +69,11 @@ def supervisor_agent(state: AgentState) -> dict:
         # 라우팅 호출 실패가 그래프 전체를 죽이지 않도록 격리 → 아래 폴백으로 코어 3개 투입
         agents = []
 
-    # LLM이 핵심 에이전트를 하나도 선택 안 하면 3개 전부 기본 투입
-    if not any(a in agents for a in _CORE):
-        agents = list(_CORE)
+    # ── 결정론 키워드 게이트를 먼저 적용 (LLM 선택 보강) ──
+    q = state["query"]
 
     # 가족 공유 감지: (가족 명사 AND 공유 동사) 조합일 때만 FamilyBridge 추가
     # — "노후 생활비 알려줘" 같은 일반 질문에 자녀 리포트가 오발송되는 것을 방지
-    q = state["query"]
     if any(m in q for m in _FAMILY_MEMBERS) and any(v in q for v in _SHARE_VERBS):
         if "FamilyBridge" not in agents:
             agents.append("FamilyBridge")
@@ -92,6 +90,11 @@ def supervisor_agent(state: AgentState) -> dict:
     ):
         if "Negotiation" not in agents:
             agents.append("Negotiation")
+
+    # ── 코어 폴백: 게이트까지 적용해도 아무 에이전트도 없을 때만 코어 3개 기본 투입.
+    # (경영점검·가족공유 등 non-core 단독 질문을 매각/승계 분석으로 덮어쓰지 않도록)
+    if not agents:
+        agents = list(_CORE)
 
     route = _ROUTE_MAP.get(agents[0], "general")
 

@@ -63,30 +63,49 @@ def synthesizer_agent(state: AgentState) -> dict:
     if state.get("negotiation_result", {}).get("deal_summary"):
         opinions.append(f"[가족 협상 조율 에이전트]\n{state['negotiation_result']['deal_summary']}")
 
+    # 경영 건강·이상거래(모니터링) 의견 — EarlyWarning 단독/보조 질문 대응
+    _health = state.get("health_score") or {}
+    _fraud = state.get("fraud_alerts") or {}
+    if _health or _fraud:
+        _mon = []
+        if _health:
+            _mon.append(f"경영 건강 점수 {_health.get('overall_score', '-')}점 (등급: {_health.get('overall_grade', '-')}).")
+            for _w in (_health.get("warnings") or [])[:3]:
+                _mon.append(f"- {_w}")
+            if _health.get("exit_signal"):
+                _mon.append("폐업 조기경보: 매출·상권 지표가 경보 수준으로 엑시트 시점 검토가 필요합니다.")
+        if _fraud and _fraud.get("alerts"):
+            _mon.append(f"최근 {_fraud.get('period_days', 90)}일 이상거래 {len(_fraud['alerts'])}건 감지 — 보이스피싱·사기 주의가 필요합니다.")
+        if _mon:
+            opinions.append("[경영 건강·거래 안심 에이전트]\n" + "\n".join(_mon))
+
     if not opinions:
         return {
             "final_response": "분석 결과가 없습니다. 다시 질문해 주세요.",
             "active_agents": ["Synthesizer"],
         }
 
-    # 단일 에이전트 응답: 시나리오 비교 없이 질문에 직접 답변
+    # 시나리오(A/B/C) 비교는 실제 시나리오 데이터가 있을 때만. 그 외(단일 에이전트·
+    # 경영점검 등 non-core)는 질문에 직접 답변 — 매각/승계 비교를 강제하지 않는다.
     _core = {"BusinessValuation", "TaxSuccession", "PostExitWM"}
     _active_core = [a for a in selected if a in _core]
-    if len(_active_core) == 1:
+    _has_scenarios = bool(state.get("retirement_portfolio", {}).get("scenario_sale"))
+    if len(_active_core) <= 1 or not _has_scenarios:
         llm = get_llm("smart")
         answer = llm.invoke([
             SystemMessage(content=(
                 "당신은 JB Legacy 금융 상담사입니다.\n"
                 "아래 전문가 분석을 바탕으로 사용자 질문에 직접 답변하세요.\n"
                 "A/B/C 시나리오 비교는 하지 마세요.\n"
-                "반드시 계산 근거(공식·가정·수치 출처)를 포함해 설명하세요.\n"
+                "숫자가 있으면 계산 근거(공식·가정·수치 출처)를 포함해 설명하세요.\n"
                 "예: 권리금이라면 '월순이익 X원 × Y개월 배수 = Z원' 형식으로 설명.\n"
                 "예: 세금이라면 '과세표준 X원 × 세율 Y% - 누진공제 Z원 = 세금' 형식으로.\n"
+                "경영 건강·이상거래 질문이면 점수·경보·감지 내역을 쉽게 요약해 주세요.\n"
                 "마크다운 기호(*, **, #, `)를 사용하지 마세요.\n"
                 "마지막에 세무사·PB 상담 권장 문구를 한 줄 추가하세요."
             )),
             HumanMessage(content=(
-                f"[전문가 분석]\n{opinions[0]}\n\n"
+                f"[전문가 분석]\n" + "\n\n".join(opinions) + "\n\n"
                 f"[사용자 질문]\n{state['query']}"
             )),
         ]).content
