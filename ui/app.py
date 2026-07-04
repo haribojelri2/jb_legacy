@@ -1483,6 +1483,10 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
                             _nr["compliance_feedback"] = _fb
 
                         merged = {**result, **neg_out}
+                        # 핵심 에이전트 목록 보존(+Negotiation) — 안 하면 synthesizer가
+                        # 단일 에이전트로 오판해 D 미주입 직행 경로를 타 재추천이 안 됨
+                        merged["active_agents"] = (
+                            list(result.get("active_agents", [])) + ["Negotiation"])
 
                         # D안을 반영해 최종 추천 재계산 — Synthesizer가 A·B·C·D 중 최적 재선택
                         resynth = synthesizer_agent(merged)
@@ -1498,7 +1502,15 @@ def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
                     st.session_state["show_negotiation_form"] = False
 
+                    # 재추천 결과를 부모 채팅에 새 메시지로 남겨 화면에 반영
                     _rec = merged.get("recommended_scenario", "")
+                    _new_answer = merged.get("final_response", "")
+                    if _new_answer:
+                        _hist = st.session_state.get("chat_history", [])
+                        _hist.append({"role": "assistant",
+                            "content": f"👨‍👩‍👧 가족 합의안 D를 반영해 다시 분석했습니다.\n\n{_new_answer}"})
+                        st.session_state["chat_history"] = _hist
+
                     st.success(f"D안 반영 완료 — AI가 A·B·C·D를 다시 비교해 "
                                f"{('최종 ' + _rec + '안 추천') if _rec else '재추천'}했습니다!")
 
