@@ -2328,31 +2328,32 @@ if st.session_state["step"] == 1:
 
             st.caption(f"적용 월 순이익: **{_avg_profit:,}원** (현재는 참고용 — 추후 분석에 반영 예정)")
 
-            st.markdown('<p class="ob-group">상황 입력</p>', unsafe_allow_html=True)
+            with st.expander("⚙️  세부 조건 조정  ·  기본값으로 바로 시작할 수 있어요", expanded=False):
+                st.caption("자녀 승계 의향 · 상권 · 은퇴 시점 · 목표 생활비 · 주택연금 — 필요할 때만 바꾸세요")
 
-            r1c1, r1c2, r1c3 = st.columns(3)
+                r1c1, r1c2, r1c3 = st.columns(3)
 
-            with r1c1:
+                with r1c1:
 
-                succession_input = st.selectbox("자녀 승계 의향", ["예", "아니오"])
+                    succession_input = st.selectbox("자녀 승계 의향", ["예", "아니오"])
 
-            with r1c2:
+                with r1c2:
 
-                market_input     = st.selectbox("지역 상권 트렌드", ["성장", "보합", "하락"], index=2)
+                    market_input     = st.selectbox("지역 상권 트렌드", ["성장", "보합", "하락"], index=2)
 
-            with r1c3:
+                with r1c3:
 
-                retirement_input = st.selectbox("은퇴 시점", ["1년 이내", "3년 이내", "5년 이상"])
+                    retirement_input = st.selectbox("은퇴 시점", ["1년 이내", "3년 이내", "5년 이상"])
 
-            r2c1, r2c2, _ = st.columns(3)
+                r2c1, r2c2, _ = st.columns(3)
 
-            with r2c1:
+                with r2c1:
 
-                target_label       = st.selectbox("월 목표 생활비", list(_TARGET_OPTS.keys()), index=3)
+                    target_label       = st.selectbox("월 목표 생활비", list(_TARGET_OPTS.keys()), index=3)
 
-            with r2c2:
+                with r2c2:
 
-                home_pension_input = st.selectbox("주택연금 활용", ["아니오", "예"])
+                    home_pension_input = st.selectbox("주택연금 활용", ["아니오", "예"])
 
 
 
