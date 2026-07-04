@@ -180,23 +180,16 @@ st.markdown("""
   --jb-gold: #C7952B;
 }
 
-/* 외곽: 다크 네이비 프레임 (JB 아이덴티티) */
-.stApp {
-  background:
-    radial-gradient(circle at 12% 8%, rgba(64,224,208,0.10), transparent 26%),
-    radial-gradient(circle at 92% 4%, rgba(77,163,255,0.14), transparent 28%),
-    linear-gradient(135deg, var(--jb-navy-1) 0%, #081845 45%, #050916 100%) !important;
-}
+/* 바탕: 깔끔한 흰색 */
+.stApp { background: #FFFFFF !important; }
 header[data-testid="stHeader"] { background: transparent; }
 
-/* 안쪽: 깔끔한 라이트 컨텐츠 서피스 (프레임 안에 떠 있는 앱 카드) */
+/* 컨텐츠 컨테이너 — 넓게, 카드 프레임 없이 흰 바탕에 자연스럽게 */
 .block-container {
-  max-width: 1080px;
+  max-width: 1320px;
   background: var(--surface);
-  border-radius: 24px;
-  padding: 2.4rem 2.6rem 3rem !important;
-  margin-top: 1.6rem;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.35);
+  padding: 1.4rem 2rem 3rem !important;
+  margin-top: 0.4rem;
 }
 
 /* 타이포 — 라이트 서피스라 어두운 글씨 */
@@ -262,14 +255,19 @@ button[data-testid="baseButton-secondary"] {
 button[data-testid="baseButton-secondary"]:hover { background: var(--surface-2) !important; border-color: #CFD9EA !important; color: var(--jb-navy-2) !important; }
 
 /* 탭 — 라이트 언더라인 */
-div[data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--line); }
-button[data-baseweb="tab"] { background: transparent !important; color: var(--ink-3) !important; font-weight: 600 !important; border-radius: 8px 8px 0 0 !important; }
-button[data-baseweb="tab"][aria-selected="true"] { background: transparent !important; color: var(--jb-blue) !important; }
+div[data-baseweb="tab-list"] { gap: 0 !important; border-bottom: 1px solid var(--line); }
+button[data-baseweb="tab"] { position: relative; padding: 8px 20px !important; background: transparent !important; color: var(--ink-3) !important; font-weight: 600 !important; }
+/* 탭 사이 세로 구분선 */
+button[data-baseweb="tab"]:not(:last-of-type)::after {
+  content: ""; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 1px; height: 13px; background: #CBD6E8;
+}
+button[data-baseweb="tab"][aria-selected="true"] { background: transparent !important; color: var(--jb-blue) !important; font-weight: 700 !important; }
 div[data-baseweb="tab-highlight"] { background: var(--jb-blue) !important; }
 
 /* 채팅 */
 div[data-testid="stChatMessage"] { border-radius: 16px; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
-div[data-testid="stBottomBlockContainer"] { background: transparent !important; max-width: 1080px !important; margin-left: auto !important; margin-right: auto !important; }
+div[data-testid="stBottomBlockContainer"] { background: transparent !important; max-width: 1520px !important; margin-left: auto !important; margin-right: auto !important; }
 div[data-testid="stChatInput"] { border-radius: 16px !important; }
 
 /* 입력 */
@@ -1003,8 +1001,14 @@ def _portfolio_section(portfolio: dict, recommended: str = ""):
 
 
 
-def _negotiation_section(negotiation_result: dict):
-    """이과장이 제안한 D안(합의안) 섹션 — 이사장 분석 패널에 표시."""
+def _child_name_of(parent_id: str) -> str:
+    """사장님 페르소나의 상속인(자녀) 이름. 없으면 '자녀'."""
+    fam = USERS.get(parent_id, {}).get("family") or []
+    return USERS.get(fam[0], {}).get("name", "자녀") if fam else "자녀"
+
+
+def _negotiation_section(negotiation_result: dict, child_name: str = "자녀"):
+    """자녀가 제안한 D안(합의안) 섹션 — 사장님 분석 패널에 표시."""
 
     if not negotiation_result:
 
@@ -1023,7 +1027,7 @@ def _negotiation_section(negotiation_result: dict):
     st.divider()
 
     st.markdown(
-        '<p class="section-label" style="color:#16a34a">D안 — 자녀(이과장)의 협상 제안</p>',
+        f'<p class="section-label" style="color:#16a34a">D안 — {child_name}의 협상 제안</p>',
         unsafe_allow_html=True,
     )
 
@@ -1035,7 +1039,7 @@ def _negotiation_section(negotiation_result: dict):
             f'<div style="background:#f0fdf4;border-left:4px solid #16a34a;'
             f'padding:12px 16px;border-radius:0 8px 8px 0;font-size:14px;'
             f'color:#14532d;margin-bottom:16px">'
-            f'이과장의 한마디: <em>"{msg}"</em></div>',
+            f'{child_name}의 한마디: <em>"{msg}"</em></div>',
             unsafe_allow_html=True,
         )
 
@@ -1282,13 +1286,17 @@ def _render_analysis_result(result, selected_user):
         _portfolio_section(result.get("retirement_portfolio", {}), recommended)
 
     with t_nego:
+        _nego_child = _child_name_of(selected_user)
         if neg:
-            _negotiation_section(neg)
+            _negotiation_section(neg, _nego_child)
         else:
-            st.caption("자녀(이과장)가 협상 조건을 제안하면 합의안(D안)이 여기에 표시됩니다.")
-        if st.button("자녀(이과장)에게 공유 / 협상 시작", width='stretch', key="share_child"):
-            st.session_state["split_result"] = result
-            st.session_state["child_view_active"] = True
+            st.caption(f"{_nego_child}의 협상 조건이 제안되면 합의안(D안)이 여기에 표시됩니다.")
+        _child_id = (USERS.get(selected_user, {}).get("family") or [None])[0]
+        if _child_id and st.button(
+            f"{USERS[_child_id]['name']}에게 공유 / 협상 시작 →", width='stretch', key="share_child"):
+            st.session_state["split_result"]      = result
+            st.session_state["child_parent_user"] = selected_user
+            st.session_state["selected_user"]     = _child_id
             st.rerun()
 
     with t_gan:
@@ -1336,13 +1344,15 @@ def _render_analysis_result(result, selected_user):
 
 
 
-def _child_dashboard(result: dict | None):
+def _child_dashboard(result: dict | None, parent_user: str = "lee_sajang"):
 
-    parent = USERS.get("lee_sajang", {})
+    parent = USERS.get(parent_user, {})
 
     biz    = parent.get("business", {})
 
-    st.markdown("#### 아버지(이사장) 은퇴 플랜 리포트")
+    child_name = _child_name_of(parent_user)
+
+    st.markdown(f"#### 아버지({parent.get('name', '')}) 은퇴 플랜 리포트")
 
     c1, c2, c3 = st.columns(3)
 
@@ -1403,7 +1413,7 @@ def _child_dashboard(result: dict | None):
 
         if st.session_state.get("show_negotiation_form", True) and not neg_existing:
 
-            st.markdown("#### 이과장의 협상 제안")
+            st.markdown(f"#### {child_name}의 협상 제안")
 
             st.caption("아버지의 시나리오를 검토하고 내 조건을 제안해보세요.")
 
@@ -1690,26 +1700,10 @@ def _youth_matching_section(user_id: str):
     )
 
     candidates = info["candidates"]
-    goodwill   = info["goodwill"]
 
-    # JB 사업 가치 헤드라인: 인수 1건 성사 시 인수 청년의 대출 조달액 = JB 신규 여신
-    # (가게는 한 번만 매각되므로 합계가 아니라 인수자 1명 기준)
-    top_credit = info.get("jb_new_credit_top", 0)
-    lo, hi = info.get("jb_new_credit_range", (0, 0))
-    if top_credit:
-        range_note = f" (인수 청년에 따라 {lo:,}~{hi:,}원)" if lo != hi else ""
-        st.markdown(
-            f'<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;'
-            f'padding:12px 16px;margin-bottom:10px">'
-            f'<span style="font-size:12px;color:#1e40af;font-weight:700">인수 성사 시 JB 신규 여신 고객 창출 </span>'
-            f'<span style="font-size:18px;color:#1e3a8a;font-weight:800">약 {top_credit:,}원</span>'
-            f'<span style="font-size:11px;color:#3b82f6">{range_note}</span>'
-            f'<div style="font-size:11px;color:#3b82f6;margin-top:2px">'
-            f'권리금 {goodwill:,}원 중 인수 청년이 자기자본으로 부족한 만큼을 JB 인수 대출로 조달 → '
-            f'폐업 대신 상권·고용 유지 + JB 신규 여신 고객 확보</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+    # 지역 청년에게 가게를 넘겨 상권·고용을 잇는 인수 후보 (고객 관점).
+    # ※ 은행 관점의 '신규 여신 창출' 지표는 고객 화면에 노출하지 않는다(발표자료 전용).
+    st.caption("폐업 대신, 가게를 이어받을 지역 청년 창업가 후보입니다. 부족한 인수 자금은 JB 인수 대출로 지원됩니다.")
 
     cols = st.columns(len(candidates))
     for col, c in zip(cols, candidates):
@@ -1833,12 +1827,13 @@ def _fraud_guard_section(user_id: str):
         )
 
     # ── 가족 알림 (FamilyBridge 연계 스토리) ──
+    _fraud_child = _child_name_of(user_id)
     sent_key = f"fraud_alert_sent_{user_id}"
     if st.session_state.get(sent_key):
-        st.success("자녀(이과장)에게 이상거래 알림이 전송되었습니다.")
+        st.success(f"{_fraud_child}에게 이상거래 알림이 전송되었습니다.")
         with st.expander("전송된 알림 내용"):
             st.text(build_family_alert(USERS.get(user_id, {}), alerts))
-    elif st.button("자녀(이과장)에게 이상거래 알림 보내기",
+    elif st.button(f"{_fraud_child}에게 이상거래 알림 보내기",
                    width='stretch', key="fraud_alert_btn", type="primary"):
         st.session_state[sent_key] = True
         st.rerun()
@@ -2183,21 +2178,9 @@ if st.session_state["step"] == 1:
             label_visibility="collapsed",
         )
 
-        st.markdown('<p class="ob-group">자녀 페르소나</p>', unsafe_allow_html=True)
-
-        _CHILD_LABELS = {
-            "none":        "— 자녀 없음 (사장님 단독 분석)",
-            "lee_gwajang": "이과장  32세 · 서울 · 직장인 자녀",
-        }
-
-        selected_child = st.radio(
-            "자녀",
-            list(_CHILD_LABELS.keys()),
-            format_func=lambda x: _CHILD_LABELS[x],
-            label_visibility="collapsed",
-        )
-
-        selected_user = selected_child if selected_child != "none" else selected_owner
+        # 자녀(이과장) 화면은 사장님 분석 완료 후 '자녀에게 공유'로만 진입한다.
+        selected_user = selected_owner
+        st.caption("자녀 화면은 사장님 분석을 마친 뒤 결과 패널의 '자녀에게 공유'로 열립니다.")
 
 
 
@@ -2364,7 +2347,7 @@ else:
 
             f"주택연금 {life.get('home_pension','—')}"
 
-        ) if selected_user == "lee_sajang" else profile.get("name", "")
+        ) if profile.get("type") == "self_employed" else profile.get("name", "")
 
         st.markdown(
 
@@ -2384,11 +2367,21 @@ else:
 
     # ── 이과장 전용 화면 ──────────────────────────────────────────────────
 
-    if selected_user == "lee_gwajang":
+    if profile.get("type") == "child":
+
+        parent_user   = st.session_state.get("child_parent_user", profile.get("parent", "lee_sajang"))
 
         parent_result = st.session_state.get("split_result") or st.session_state.get("last_result")
 
-        _child_dashboard(parent_result)
+        if st.button("← 아버지 화면으로", key="child_back"):
+
+            st.session_state["selected_user"]     = parent_user
+
+            st.session_state["child_view_active"] = False
+
+            st.rerun()
+
+        _child_dashboard(parent_result, parent_user)
 
         st.divider()
 
@@ -2424,10 +2417,10 @@ else:
 
     ))
 
-    # 사장님(이과장 제외)이 분석 결과를 가지면 부가 탭을 노출한다.
+    # 사장님(자녀 제외)이 분석 결과를 가지면 부가 탭을 노출한다.
     # 경영건강·권리금·거래안심은 추천 무관하게 항상, 청년 매칭은 매각이 포함될 때만.
     _is_sale = (
-        selected_user != "lee_gwajang"
+        profile.get("type") == "self_employed"
         and _has_result
     )
     # 청년 매칭(외부 인수)은 "매각 시나리오가 분석에 포함되면" 노출한다.
@@ -2443,8 +2436,16 @@ else:
     if _has_result or st.session_state.get("child_view_active"):
 
         # 결과가 있을 때만 카드를 넓혀 분석 아티팩트에 충분한 폭 확보
-        st.markdown("<style>.block-container{max-width:1400px !important;}</style>", unsafe_allow_html=True)
-        col_chat, col_analysis = st.columns([1, 1.55], gap="large")
+        st.markdown("<style>.block-container{max-width:1560px !important;}</style>", unsafe_allow_html=True)
+
+        # 레이아웃 비율 — 마우스로 아티팩트 폭을 동적 조절 (세션 유지)
+        _rc1, _rc2 = st.columns([2, 1])
+        with _rc2:
+            _ratio = st.slider(
+                "화면 비율  ◀ 균형 · 아티팩트 넓게 ▶", 1.2, 2.4, 1.35, 0.05,
+                key="layout_ratio",
+            )
+        col_chat, col_analysis = st.columns([1, _ratio], gap="large")
 
     else:
 
@@ -2486,7 +2487,7 @@ else:
 
         else:
 
-            _chat_container = st.container(height=430, border=False)
+            _chat_container = st.container(height=560, border=False)
 
             with _chat_container:
 
@@ -2548,7 +2549,7 @@ else:
 
             _t_health = _t_goodwill = _t_youth = _t_fraud = None
 
-        _analysis_container = _t_analysis.container(height=500, border=False)
+        _analysis_container = _t_analysis.container(height=660, border=False)
 
         with _analysis_container:
 
@@ -2861,13 +2862,17 @@ else:
 
 
 
-        elif is_family_q and has_analysis:
+        elif is_family_q and has_analysis and (USERS.get(selected_user, {}).get("family") or None):
+
+            _cid = USERS[selected_user]["family"][0]
 
             st.session_state["split_result"]      = cached
 
-            st.session_state["child_view_active"] = True
+            st.session_state["child_parent_user"] = selected_user
 
-            reply = "이전 분석 결과를 자녀(이과장)에게 공유했습니다. 오른쪽 패널에서 확인하세요."
+            st.session_state["selected_user"]     = _cid
+
+            reply = f"분석 결과를 {USERS[_cid]['name']}에게 공유하고 자녀 화면으로 전환했습니다. 검토 후 협상안(D안)을 제안할 수 있어요."
 
             chat_history.append({"role": "assistant", "content": reply})
 

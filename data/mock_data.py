@@ -50,7 +50,7 @@ USERS = {
             "pension_monthly_expected": 500_000,
             "real_estate": 150_000_000,
         },
-        "family": [],
+        "family": ["kim_child"],
         "total_business_value": 88_000_000,
         # 매각세금 약 230만 / 승계세금 0 → 규모 작아 둘 다 세금 미미
     },
@@ -77,7 +77,7 @@ USERS = {
             "pension_monthly_expected": 600_000,
             "real_estate": 800_000_000,
         },
-        "family": [],
+        "family": ["park_child"],
         "total_business_value": 1_122_000_000,
         # 매각세금 약 1,077만 / 승계세금 약 1,342만 → 외부 매각이 유리한 드문 케이스
     },
@@ -104,7 +104,7 @@ USERS = {
             "pension_monthly_expected": 1_200_000,
             "real_estate": 600_000_000,
         },
-        "family": [],
+        "family": ["choi_child"],
         "total_business_value": 1_010_000_000,
         # 매각세금 약 8,842만 / 승계세금 약 110만 → 승계 압도적 유리
     },
@@ -117,6 +117,36 @@ USERS = {
         "type": "child",
         "parent": "lee_sajang",
         "job": "서울 직장인",
+        "slow_ui": False,
+    },
+
+    "kim_child": {
+        "name": "김주임",
+        "age": 29,
+        "location": "부산",
+        "type": "child",
+        "parent": "kim_soojang",
+        "job": "부산 직장인",
+        "slow_ui": False,
+    },
+
+    "park_child": {
+        "name": "박대리",
+        "age": 30,
+        "location": "서울",
+        "type": "child",
+        "parent": "park_wonjang",
+        "job": "서울 직장인",
+        "slow_ui": False,
+    },
+
+    "choi_child": {
+        "name": "최과장",
+        "age": 38,
+        "location": "수원",
+        "type": "child",
+        "parent": "choi_daepyo",
+        "job": "수원 직장인",
         "slow_ui": False,
     },
 }
