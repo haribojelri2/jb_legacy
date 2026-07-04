@@ -28,19 +28,14 @@ def test_step1_logo_visible(page: Page):
 
 def test_step1_persona_radio_visible(page: Page):
     expect(page.locator("text=이사장")).to_be_visible()
-    expect(page.locator("text=이과장")).to_be_visible()
+    expect(page.locator("text=김소장")).to_be_visible()
+    expect(page.locator("text=박원장")).to_be_visible()
+    expect(page.locator("text=최대표")).to_be_visible()
 
 
 def test_step1_sajang_shows_form(page: Page):
-    expect(page.locator("text=자녀 승계 의향")).to_be_visible()
-    expect(page.locator("button").filter(has_text=re.compile("시작하기"))).to_be_visible()
-
-
-def test_step1_gwajang_shows_info(page: Page):
-    page.locator("label").filter(has_text="이과장").click()
-    page.wait_for_timeout(500)
-    expect(page.locator("button").filter(has_text="이과장 화면 열기")).to_be_visible()
-    expect(page.locator("text=자녀 승계 의향")).not_to_be_visible()
+    expect(page.locator("text=세부 조건 조정")).to_be_visible()
+    expect(page.locator("button").filter(has_text=re.compile("분석 시작하기"))).to_be_visible()
 
 
 def test_step1_to_step2_navigation(page: Page):
@@ -65,8 +60,24 @@ def test_step2_back_button(page: Page):
     _go_step2(page)
     page.locator("button").filter(has_text="처음으로").click()
     page.wait_for_load_state("networkidle")
-    expect(page.locator("text=JB Legacy").first).to_be_visible(timeout=8000)
+    expect(page.locator("text=분석 시작하기").first).to_be_visible(timeout=8000)
     expect(page.locator("text=대화")).not_to_be_visible(timeout=3000)
+
+
+def test_step2_child_sharing_flow(page: Page):
+    _go_step2(page)
+    page.locator("button").filter(has_text=re.compile("폐업할지 승계할지")).click()
+    # Wait for the analysis result panel to appear (up to 120 seconds, as multi-agent LLM analysis can take ~80 seconds)
+    expect(page.locator("text=세금 비교")).to_be_visible(timeout=120000)
+    # Click on "가족 협상(D안)" tab
+    page.locator("button").filter(has_text="가족 협상(D안)").click()
+    # Click sharing button
+    page.locator("button").filter(has_text="이과장에게 공유").click()
+    # Click "이과장이(가) 링크 열기" button
+    page.locator("button").filter(has_text="링크 열기").click()
+    # Verify child dashboard elements
+    expect(page.locator("text=아버지(이사장) 은퇴 플랜 리포트")).to_be_visible(timeout=10000)
+    expect(page.locator("text=이과장의 협상 제안")).to_be_visible()
 
 
 def test_step2_casual_message_no_analysis_panel(page: Page):
