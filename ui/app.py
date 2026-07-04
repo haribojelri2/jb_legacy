@@ -715,7 +715,7 @@ def _tax_cards(tax: dict):
 
         st.markdown('<div class="tax-card">', unsafe_allow_html=True)
 
-        st.markdown("##### 가업승계 과세특례")
+        st.markdown(f"##### {special.get('label', '가업승계 과세특례')}")
 
         st.metric("예상 세금", _won_short(special.get('total_tax', 0)),
 
@@ -723,7 +723,7 @@ def _tax_cards(tax: dict):
 
                   delta_color="inverse")
 
-        st.caption("조세특례제한법 제30조의6")
+        st.caption(special.get("note") or "조세특례제한법 제30조의6")
 
         st.markdown('</div>', unsafe_allow_html=True)
 

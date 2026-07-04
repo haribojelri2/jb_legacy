@@ -273,10 +273,11 @@ def synthesizer_agent(state: AgentState) -> dict:
             f"권리금 산정: {goodwill_formula}\n"
             f"매각 세금 계산: 권리금 {goodwill:,}원 × 40%(필요경비 60% 공제)"
             f" = 과세표준 {goodwill_taxable:,}원 → 세금(지방세 10% 포함) {sale_tax:,}원\n"
-            f"승계 세금 계산(조특법 제30조의6): 사업가치 {biz_value:,}원"
-            f" - 10억원 공제 = 과세표준 {sp_taxable:,}원 × 10%"
+            f"승계 세금 계산({sp.get('label', '가업승계 과세특례')}): 사업가치 {biz_value:,}원"
+            f" - 공제 {sp.get('deduction', 0):,}원 = 과세표준 {sp_taxable:,}원"
             f" → 증여세(지방세 포함) {special_tax:,}원\n"
-            f"세금 절감액: {sale_tax:,}원 - {special_tax:,}원 = {sale_tax - special_tax:,}원"
+            + (f"※ {sp['note']}\n" if sp.get('note') else "")
+            + f"세금 절감액: {sale_tax:,}원 - {special_tax:,}원 = {sale_tax - special_tax:,}원"
             f"{monthly_basis}"
         )
 
@@ -409,16 +410,19 @@ def _build_calc_section(tax: dict, bv: dict, s_sale: dict | None,
             f"  최종 세금: {national_tax:,}원 + {local_tax_amount:,}원 = {sale_tax:,}원"
         )
         lines.append(
-            f"승계 세금(조특법 제30조의6 가업승계 과세특례): 사업가치 {biz_value:,}원"
-            f" - 10억원 공제 = 과세표준 {sp_taxable:,}원 × 10%"
+            f"승계 세금({sp.get('label', '가업승계 과세특례')}): 사업가치 {biz_value:,}원"
+            f" - 공제 {sp.get('deduction', 0):,}원 = 과세표준 {sp_taxable:,}원"
             f" → 증여세(지방소득세 포함) {special_tax:,}원"
         )
-        lines.append(
-            "  특례 적용 요건(조특법 제30조의6):\n"
-            "    - 증여자: 중소기업(연매출 120억원 이하 기준) 10년 이상 영위 대표자\n"
-            "    - 수증자: 18세 이상 자녀, 증여일 前 2년 이내 가업 종사 또는 즉시 종사\n"
-            "    - 사후관리: 수증 후 5년간 가업 유지 의무(위반 시 세액 추징)"
-        )
+        if sp.get("eligible", True):
+            lines.append(
+                "  특례 적용 요건(조특법 제30조의6):\n"
+                "    - 증여자: 중소기업(연매출 120억원 이하 기준) 10년 이상 영위 대표자\n"
+                "    - 수증자: 18세 이상 자녀, 증여일 前 2년 이내 가업 종사 또는 즉시 종사\n"
+                "    - 사후관리: 수증 후 5년간 가업 유지 의무(위반 시 세액 추징)"
+            )
+        elif sp.get("note"):
+            lines.append(f"  ※ {sp['note']}")
         lines.append(
             f"세금 절감액: {sale_tax:,}원 - {special_tax:,}원 = {sale_tax - special_tax:,}원"
         )

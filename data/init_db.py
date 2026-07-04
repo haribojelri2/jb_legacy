@@ -10,22 +10,23 @@ import os
 DB_PATH = os.path.join(os.path.dirname(__file__), "mock_data.db")
 
 # 데이터 내용이 바뀌면 이 버전을 올린다 → 기존 DB가 있어도 자동 재생성됨
-DB_VERSION = "2026-06-13-real-products-v2"
+DB_VERSION = "2026-07-04-tx-all-personas-v3"
 
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
 
 
-# ── 이사장 개인 거래내역 시드 (최근 90일, day_offset 0=오늘) ────────────────
+# ── 개인 거래내역 시드 (최근 90일, day_offset 0=오늘) ──────────────────────
 # 정상 거래: 주간 시간대, 소액 반복 (월 생활비 약 190만원 수준)
 # 이상 거래(is_anomaly=1): 보이스피싱 전형 패턴 — 심야 최초 수취인 고액 이체,
 # 상품권 분할 결제, 심야 해외 결제
-def _build_lee_sajang_transactions() -> list[tuple]:
+# city만 바꿔 4개 사장님 페르소나 모두에 동일 구조로 시드한다(거래 안심 데모 일관화).
+def _build_transactions(user_id: str, city: str) -> list[tuple]:
     rows = []
 
     def add(day, time, merchant, category, channel, amount, anomaly=0):
-        rows.append(("lee_sajang", day, time, merchant, category, channel, amount, anomaly))
+        rows.append((user_id, day, time, merchant, category, channel, amount, anomaly))
 
     # 월 반복 고정 지출 (자동이체) — 3개월
     for month_start in (2, 32, 62):
@@ -39,25 +40,25 @@ def _build_lee_sajang_transactions() -> list[tuple]:
                     83_000, 69_000, 91_000, 78_000, 86_000, 73_000, 95_000, 67_000,
                     84_000, 72_000, 89_000, 61_000]
     for d, amt in zip(mart_days, mart_amounts):
-        add(d, "11:20", "하나로마트 전주점", "식료품", "카드", amt)
+        add(d, "11:20", f"하나로마트 {city}점", "식료품", "카드", amt)
 
     # 병원·약국 (월 2~3회)
-    for d, m, amt in [(6, "전주성모내과", 74_000), (7, "온누리약국", 28_000),
-                      (20, "전주성모내과", 68_000), (36, "전주성모내과", 81_000),
-                      (37, "온누리약국", 31_000), (55, "한빛정형외과", 125_000),
-                      (56, "온누리약국", 24_000), (78, "전주성모내과", 71_000)]:
+    for d, m, amt in [(6, f"{city} 내과의원", 74_000), (7, "온누리약국", 28_000),
+                      (20, f"{city} 내과의원", 68_000), (36, f"{city} 내과의원", 81_000),
+                      (37, "온누리약국", 31_000), (55, f"{city} 정형외과", 125_000),
+                      (56, "온누리약국", 24_000), (78, f"{city} 내과의원", 71_000)]:
         add(d, "10:40", m, "병원·약국", "카드", amt)
 
     # 외식·경조사·교통 등
-    for d, t, m, c, amt in [(10, "18:30", "전주막걸리골목", "외식", 48_000),
+    for d, t, m, c, amt in [(10, "18:30", f"{city} 맛집골목", "외식", 48_000),
                             (24, "12:10", "가족 외식 (백반집)", "외식", 56_000),
-                            (40, "18:50", "전주막걸리골목", "외식", 43_000),
+                            (40, "18:50", f"{city} 맛집골목", "외식", 43_000),
                             (68, "12:30", "가족 외식 (백반집)", "외식", 61_000),
                             (15, "14:00", "친지 경조사비", "경조사", 100_000),
                             (49, "14:00", "지인 경조사비", "경조사", 100_000),
-                            (11, "09:30", "전주주유소", "교통", 70_000),
-                            (44, "09:40", "전주주유소", "교통", 72_000),
-                            (77, "09:20", "전주주유소", "교통", 68_000)]:
+                            (11, "09:30", f"{city} 주유소", "교통", 70_000),
+                            (44, "09:40", f"{city} 주유소", "교통", 72_000),
+                            (77, "09:20", f"{city} 주유소", "교통", 68_000)]:
         add(d, t, m, c, "카드", amt)
 
     # ── 이상 거래 (보이스피싱 패턴, ground-truth 라벨) ──
@@ -69,16 +70,28 @@ def _build_lee_sajang_transactions() -> list[tuple]:
     return rows
 
 
+# 사장님 페르소나별 (user_id, 거래 지역) — mock_data.USERS와 일치
+_TX_PERSONAS = [
+    ("lee_sajang",   "전주"),
+    ("kim_soojang",  "부산"),
+    ("park_wonjang", "강남"),
+    ("choi_daepyo",  "수원"),
+]
+
+
 def seed_transactions(cur):
     """transactions 테이블이 비어 있을 때만 시드 (idempotent)."""
     count = cur.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
     if count:
         return
+    rows = []
+    for uid, city in _TX_PERSONAS:
+        rows += _build_transactions(uid, city)
     cur.executemany(
         "INSERT INTO transactions "
         "(user_id, day_offset, tx_time, merchant, category, channel, amount, is_anomaly) "
         "VALUES (?,?,?,?,?,?,?,?)",
-        _build_lee_sajang_transactions(),
+        rows,
     )
 
 

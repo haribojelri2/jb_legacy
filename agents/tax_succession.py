@@ -24,11 +24,19 @@ def tax_succession_agent(state: AgentState) -> dict:
     # 1. 외부 매각 시: 권리금 기타소득세
     sale_tax = calc_goodwill_tax(goodwill=goodwill, other_income=other_income)
 
-    # 2. 가업승계 증여세 과세특례
-    special_tax = calc_gift_tax_special(business_value=business_value)
-
-    # 3. 일반 증여세 (특례 미적용 시 비교)
-    general_tax = calc_gift_tax_general(business_value=business_value)
+    # 2·3. 승계 세금 — 가업 10년 이상이면 과세특례(조특법 30조의6), 미만이면 일반 증여세
+    #      (특례는 '중소기업 10년 이상 영위' 요건이 있어, 미충족 시 일반 증여세로 대체)
+    special_eligible = years_operating >= 10
+    special_pure = calc_gift_tax_special(business_value=business_value)
+    general_tax  = calc_gift_tax_general(business_value=business_value)
+    if special_eligible:
+        special_tax = {**special_pure, "eligible": True, "label": "가업승계 과세특례"}
+    else:
+        special_tax = {
+            **general_tax, "eligible": False, "label": "가업승계 (일반 증여세)",
+            "note": (f"가업 영위 {years_operating}년(10년 미만)이라 가업승계 과세특례 "
+                     f"대상이 아니어서 일반 증여세를 적용했습니다."),
+        }
 
     # RAG: 관련 세법 문서 검색
     rag_context = retrieve(state["query"] + " 가업승계 세금 권리금")
@@ -50,10 +58,12 @@ def tax_succession_agent(state: AgentState) -> dict:
         HumanMessage(content=(
             f"[세법 참고 자료]\n{rag_context}\n\n"
             f"[시나리오 1 - 외부 매각]\n{sale_tax['description']}\n\n"
-            f"[시나리오 2 - 가업승계 과세특례]\n{special_tax['description']}\n\n"
-            f"[시나리오 3 - 일반 증여]\n{general_tax['description']}\n\n"
+            f"[시나리오 2 - {special_tax['label']}]\n{special_tax['description']}\n"
+            + (f"※ {special_tax['note']}\n" if not special_eligible else "")
+            + f"\n[시나리오 3 - 일반 증여]\n{general_tax['description']}\n\n"
             f"질문: {state['query']}\n\n"
-            "두 시나리오의 세금 차이, 특례 적용 조건, 어느 쪽이 유리한지 설명해주세요."
+            "각 시나리오의 세금 차이, 특례 적용 조건(가업 10년 이상 등), 어느 쪽이 유리한지 설명해주세요.\n"
+            "가업 10년 미만이면 과세특례가 아니라 일반 증여세가 적용됨을 반드시 반영하세요."
         )),
     ]).content
 
